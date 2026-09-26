@@ -1,0 +1,11 @@
+{
+  "name": "Sumo Smash",
+  "short_name": "Sumo Smash",
+  "description": "Schubs deine Gegner von der bröckelnden Arena – 1 gegen 1 oder 2 gegen 2.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "background_color": "#1b0b2e",
+  "theme_color": "#1b0b2e",
+  "icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

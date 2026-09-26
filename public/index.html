@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="de" data-v="1">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>Sumo Smash – Schubs-Duell</title>
+  <meta name="description" content="3D-Handyspiel im Browser: Schubs deine Gegner von der bröckelnden Arena. 1 gegen 1 oder 2 gegen 2 – gegen KI, zu zweit an einem Handy oder online." />
+  <meta name="theme-color" content="#1b0b2e" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="style.css?v=1" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="labels"></div>
+
+  <!-- Anzeige im Spiel -->
+  <div id="hud" class="hidden">
+    <div class="scorebar">
+      <div class="team t0"><span class="tname">ROT</span><span class="dots" id="dots0"></span></div>
+      <div class="mid"><div id="round-lbl">Runde 1</div><div id="shrink-lbl"></div></div>
+      <div class="team t1"><span class="dots" id="dots1"></span><span class="tname">BLAU</span></div>
+    </div>
+    <div id="banner"><div class="b b1"></div><div class="b b2"></div></div>
+    <button id="btn-quit" class="icon-btn" title="Verlassen (Esc)">✕</button>
+    <button id="btn-mute" class="icon-btn" title="Ton an/aus (M)">🔊</button>
+  </div>
+
+  <div id="toasts"></div>
+
+  <!-- Touch-Steuerung (wird von input.js gefüllt) -->
+  <div id="touch" class="hidden"></div>
+
+  <!-- Hauptmenü -->
+  <section id="scr-menu" class="screen">
+    <div class="panel">
+      <h1 class="logo"><span class="l1">SUMO</span><span class="l2">SMASH</span></h1>
+      <p class="tagline">Schubs sie von der Arena, bevor sie dich runterschubsen!</p>
+      <label class="field">
+        <span>Dein Name</span>
+        <input id="in-name" class="name-in" maxlength="14" placeholder="Spieler" autocomplete="off" />
+      </label>
+      <div class="menu-buttons">
+        <button class="btn big" data-go="scr-ai">🤖 Gegen KI</button>
+        <button class="btn big" data-go="scr-local">👥 Zu zweit an einem Handy</button>
+        <button class="btn big accent" data-go="scr-online">🌐 Online mit Freunden</button>
+        <button class="btn" data-go="scr-help">❓ So geht's</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Gegen KI -->
+  <section id="scr-ai" class="screen hidden">
+    <div class="panel">
+      <h2>🤖 Gegen KI</h2>
+      <div class="field"><span>Modus</span>
+        <div class="seg" data-set="aiMode"><button data-v="1v1">1 gegen 1</button><button data-v="2v2">2 gegen 2</button></div>
+      </div>
+      <p class="hint small" data-show="aiMode=2v2">Du spielst mit einem KI-Partner im Team Rot.</p>
+      <div class="field"><span>Schwierigkeit</span>
+        <div class="seg" data-set="aiDiff"><button data-v="easy">Leicht</button><button data-v="normal">Mittel</button><button data-v="hard">Schwer</button></div>
+      </div>
+      <button id="btn-ai-start" class="btn big accent">Los geht's!</button>
+      <button class="btn ghost" data-go="scr-menu">← Zurück</button>
+    </div>
+  </section>
+
+  <!-- Zu zweit an einem Gerät -->
+  <section id="scr-local" class="screen hidden">
+    <div class="panel">
+      <h2>👥 Zu zweit an einem Handy</h2>
+      <p class="hint">Legt das Handy flach zwischen euch auf den Tisch. Jeder spielt von seiner Seite:
+        links wischen zum Laufen, rechts tippen zum Rammen.<br />Am PC: <b>WASD + Leertaste</b> gegen <b>Pfeiltasten + Enter</b>.</p>
+      <div class="field"><span>Modus</span>
+        <div class="seg" data-set="localMode"><button data-v="1v1">1 gegen 1</button><button data-v="2v2">2 gegen 2 (mit KI-Partnern)</button></div>
+      </div>
+      <div class="field" data-show="localMode=2v2"><span>Stärke der KI-Partner</span>
+        <div class="seg" data-set="localDiff"><button data-v="easy">Leicht</button><button data-v="normal">Mittel</button><button data-v="hard">Schwer</button></div>
+      </div>
+      <button id="btn-local-start" class="btn big accent">Los geht's!</button>
+      <button class="btn ghost" data-go="scr-menu">← Zurück</button>
+    </div>
+  </section>
+
+  <!-- Online -->
+  <section id="scr-online" class="screen hidden">
+    <div class="panel">
+      <h2>🌐 Online mit Freunden</h2>
+      <p class="hint">Erstelle einen Raum und schick den Link an deine Freunde – oder tritt mit dem 4-stelligen Code bei.
+        1 gegen 1 oder 2 gegen 2, freie Plätze füllt die KI.</p>
+      <label class="field">
+        <span>Dein Name</span>
+        <input id="in-name2" class="name-in" maxlength="14" placeholder="Spieler" autocomplete="off" />
+      </label>
+      <button id="btn-create" class="btn big accent">Raum erstellen</button>
+      <div class="join-row">
+        <input id="in-code" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" />
+        <button id="btn-join" class="btn big">Beitreten</button>
+      </div>
+      <p id="online-status" class="status"></p>
+      <button class="btn ghost" data-go="scr-menu">← Zurück</button>
+    </div>
+  </section>
+
+  <!-- Lobby -->
+  <section id="scr-lobby" class="screen hidden">
+    <div class="panel wide">
+      <div class="lobby-head">
+        <div>
+          <div class="lbl">Raumcode</div>
+          <div id="lobby-code" class="code">----</div>
+        </div>
+        <button id="btn-share" class="btn">🔗 Einladen</button>
+      </div>
+      <div class="teams">
+        <div class="team-col t0"><h3>Team Rot</h3><ul id="team0"></ul><button class="btn small" data-team="0">Hierher wechseln</button></div>
+        <div class="team-col t1"><h3>Team Blau</h3><ul id="team1"></ul><button class="btn small" data-team="1">Hierher wechseln</button></div>
+      </div>
+      <div id="host-settings">
+        <div class="field"><span>Modus</span>
+          <div class="seg" data-room="mode"><button data-v="1v1">1 gegen 1</button><button data-v="2v2">2 gegen 2</button></div>
+        </div>
+        <div class="field"><span>Freie Plätze</span>
+          <div class="seg" data-room="fill"><button data-v="true">mit KI füllen</button><button data-v="false">leer lassen</button></div>
+        </div>
+        <div class="field"><span>Stärke der KI</span>
+          <div class="seg" data-room="diff"><button data-v="easy">Leicht</button><button data-v="normal">Mittel</button><button data-v="hard">Schwer</button></div>
+        </div>
+      </div>
+      <p id="lobby-info" class="hint small"></p>
+      <button id="btn-start" class="btn big accent">Spiel starten</button>
+      <button id="btn-leave" class="btn ghost">Raum verlassen</button>
+    </div>
+  </section>
+
+  <!-- Anleitung -->
+  <section id="scr-help" class="screen hidden">
+    <div class="panel wide help">
+      <h2>❓ So geht's</h2>
+      <ul>
+        <li><b>Ziel:</b> Schubs alle Gegner von der Arena in die Lava. Wer zuerst <b>3 Runden</b> gewinnt, holt den Sieg.</li>
+        <li><b>Laufen:</b> auf der linken Bildschirmhälfte wischen (Tastatur: WASD / Pfeile).</li>
+        <li><b>Rammen:</b> rechte Hälfte antippen (Leertaste). Wer beim Rammen trifft, schleudert den Gegner weg –
+          danach braucht der Sprint kurz zum Aufladen.</li>
+        <li><b>Frontal:</b> Rammen beide gleichzeitig ineinander, prallen beide ab.</li>
+        <li><b>Retten:</b> Nach einem Treffer rutschst du. Kurz vor der Kante noch einmal zur Mitte rammen kann dich retten!</li>
+        <li><b>Die Arena bröckelt:</b> Nach 12 Sekunden fällt Ring für Ring weg. Glühende Felder brechen gleich ab.</li>
+        <li><b>Power-ups:</b> 🪨 Koloss – schwer und groß, kaum wegzuschubsen · ⚡ Turbo – Rammen lädt blitzschnell ·
+          💥 Schockwelle – stößt alle Gegner in der Nähe weg.</li>
+        <li><b>Tipp:</b> Stell dich zwischen Gegner und Mitte, dann fliegt er beim Rammen nach außen.</li>
+      </ul>
+      <button class="btn big" data-go="scr-menu">Alles klar!</button>
+    </div>
+  </section>
+
+  <!-- Ergebnis -->
+  <section id="scr-result" class="screen hidden">
+    <div class="panel">
+      <h2 id="result-title">SIEG!</h2>
+      <p id="result-sub" class="tagline"></p>
+      <table class="stats"><thead><tr><th>Spieler</th><th title="Gegner runtergeschubst">K.O.</th><th title="Selbst runtergefallen">Stürze</th></tr></thead><tbody id="result-stats"></tbody></table>
+      <button id="btn-again" class="btn big accent">Revanche</button>
+      <button id="btn-result-menu" class="btn ghost">Menü</button>
+    </div>
+  </section>
+
+  <!-- Nachricht / Laden -->
+  <section id="scr-msg" class="screen hidden">
+    <div class="panel">
+      <p id="msg-text" class="tagline"></p>
+      <button id="btn-msg-ok" class="btn big">OK</button>
+    </div>
+  </section>
+
+
+  <script src="vendor/peerjs.min.js?v=1.5.5"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.min.js?v=0.186.1",
+      "./js/main.js": "./js/main.js?v=1",
+      "./js/sim.js": "./js/sim.js?v=1",
+      "./js/ai.js": "./js/ai.js?v=1",
+      "./js/room.js": "./js/room.js?v=1",
+      "./js/net.js": "./js/net.js?v=1",
+      "./js/render.js": "./js/render.js?v=1",
+      "./js/input.js": "./js/input.js?v=1",
+      "./js/audio.js": "./js/audio.js?v=1",
+      "./js/version.js": "./js/version.js?v=1"
+    }
+  }
+  </script>
+  <script type="module" src="js/main.js?v=1"></script>
+</body>
+</html>
