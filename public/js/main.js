@@ -2,13 +2,13 @@
 import { APP_VERSION } from './version.js';
 import { createMatch, stepMatch, applySnap, applyTiles, CFG, GOALS } from './sim.js';
 import { STAGES, stageRoster, TOUR_WIN_ROUNDS } from './tourney.js';
-import { createBrain, botThink } from './ai.js';
+import { createBrain, botThink, botReactions } from './ai.js';
 import { Renderer, Preview, POWER_ICONS, POWER_NAMES } from './render.js';
 import { HATS, EXTRAS, EMPTY_STATS, isUnlocked, sanitizeLook, randomLook, newlyUnlocked } from './looks.js';
 import { Controls } from './input.js';
 import { Sfx } from './audio.js';
 import { Net } from './net.js';
-import { sanitizeName, teamSizeOf } from './room.js';
+import { sanitizeName, teamSizeOf, EMOTES } from './room.js';
 
 // Passen Seite und Skripte nicht zusammen (alte Seite aus dem Cache nach einer
 // Veröffentlichung), einmal neu laden – sonst würde das Spiel gleich abstürzen.
@@ -163,6 +163,7 @@ class LocalSession {
       this.acc -= STEP;
       for (const p of m.players) if (p.bot) inputs.set(p.id, botThink(m, p, this.brains.get(p.id), STEP));
       stepMatch(m, STEP, inputs);
+      if (this.kind !== 'demo' && m.events.length) m.events.push(...botReactions(m, m.events, m.rng));
       for (const h of this.humans) inputs.get(h.pid).dash = false;
       events.push(...m.events);
       m.events.length = 0;
@@ -204,6 +205,8 @@ class ClientSession {
     this.kind = 'client';
     this.match = createMatch({ roster: msg.roster, rings: msg.rings, winRounds: msg.winRounds, arena: msg.arena, goal: msg.goal, seed: 1 });
     this.match.events.length = 0;
+    this.roster = msg.roster;
+    this.arenaMode = msg.arena;
     const me = msg.roster.find((r) => r.id === net.id);
     this.isPlayer = !!me;
     this.localIds = me ? [me.id] : [];
@@ -311,12 +314,14 @@ function setSession(s, { playing }) {
   renderer.setup(s.view, { localIds: s.localIds, azimuth: s.azimuth, topDown: s.topDown });
   $('#hud').classList.toggle('hidden', !playing);
   $('#touch').classList.toggle('hidden', !playing || !s.localIds.length);
+  $('#emotes').classList.toggle('hidden', !playing || s.localIds.length !== 1);
   if (playing) {
     show(null);
     if (duo) controls.configure([{ keys: 'wasd', region: 'bottom', gamepad: 0 }, { keys: 'arrows', region: 'top', gamepad: 1 }]);
     else if (s.localIds.length) controls.configure([{ keys: 'both', region: 'full', gamepad: 0 }]);
     else controls.clear();
     buildDots(s.view.winRounds);
+    hudCache = ''; // Punkte neu zeichnen (z. B. nach Gastgeber-Wechsel mit Spielstand)
     setBanner('');
     requestWakeLock();
   } else {
@@ -638,6 +643,10 @@ function handleEvents(events) {
         clearTimeout(resultTimer);
         resultTimer = setTimeout(showResult, 1400);
         break;
+      case 'emote':
+        renderer.showEmote(e.id, EMOTES[e.e] || '');
+        sfx.play('pop');
+        break;
       case 'left': {
         const p = session.view.players.find((pl) => pl.id === e.id);
         if (p) {
@@ -915,8 +924,21 @@ function onlineStatus(text) {
 }
 
 function setOnlineBusy(busy) {
-  for (const id of ['#btn-create', '#btn-join']) $(id).disabled = busy;
+  for (const id of ['#btn-quick', '#btn-create', '#btn-join']) $(id).disabled = busy;
 }
+
+$('#btn-quick').addEventListener('click', async () => {
+  sfx.unlock();
+  setOnlineBusy(true);
+  onlineStatus('Suche einen offenen Raum …');
+  try {
+    await net.quick();
+    onlineStatus('');
+  } catch (e) {
+    onlineStatus(e.message || 'Kein Raum gefunden.');
+  }
+  setOnlineBusy(false);
+});
 
 $('#btn-create').addEventListener('click', async () => {
   sfx.unlock();
@@ -981,11 +1003,42 @@ net.on('toast', (msg) => {
   else toast(esc(msg.msg));
 });
 
-net.on('hostlost', () => {
-  toMenu('scr-msg');
-  $('#msg-text').textContent = 'Die Verbindung zum Gastgeber ist abgebrochen.';
+// Gastgeber weg: Der Spieler mit der kleinsten ID übernimmt den Raum, alle anderen treten wieder bei.
+// Lief gerade eine Partie, geht sie mit dem Spielstand weiter (die angefangene Runde startet neu).
+net.on('hostlost', async (info) => {
+  const r = room;
+  const myId = info.myId;
+  const candidates = r ? r.players.map((p) => p.id).filter((id) => id !== r.hostId).sort((a, b) => a - b) : [];
+  if (!r || !info.code || !candidates.includes(myId)) {
+    toMenu('scr-msg');
+    $('#msg-text').textContent = 'Die Verbindung zum Gastgeber ist abgebrochen.';
+    return;
+  }
+  const successor = candidates[0];
+  const s = session;
+  let resume = null;
+  if (s && s.kind === 'client' && s.view.phase !== 'matchEnd' && s.roster) {
+    const v = s.view;
+    resume = { roster: s.roster, score: [...v.score], round: v.round, winRounds: v.winRounds, arena: s.arenaMode, goal: v.goal, oldHostId: r.hostId, myOldId: myId };
+  }
+  const settings = { mode: r.mode, fill: r.fill, diff: r.diff, arena: r.arena, goal: r.goal };
+  const heir = r.players.find((p) => p.id === successor);
+  setSession(demoSession(), { playing: false });
+  show('scr-msg');
+  $('#msg-text').textContent =
+    successor === myId ? 'Der Gastgeber ist weg – du übernimmst den Raum …' : `Der Gastgeber ist weg – ${heir ? heir.name : 'ein Mitspieler'} übernimmt …`;
+  try {
+    if (successor === myId) await net.takeOver(info.code, r.isPublic, settings, resume);
+    else await net.rejoin(info.code, myId);
+    toast(resume ? '🔄 Weiter geht’s – die Runde startet neu, der Spielstand bleibt.' : '🔄 Neuer Gastgeber – weiter geht’s!');
+  } catch (e) {
+    toMenu('scr-msg');
+    $('#msg-text').textContent = 'Der Raum konnte nicht fortgesetzt werden. ' + (e.message || '');
+  }
 });
 $('#btn-msg-ok').addEventListener('click', () => show('scr-menu'));
+
+let lobbyTick = null;
 
 function hatIcon(look) {
   const hat = look && HATS.find((h) => h.id === look.hat);
@@ -1014,16 +1067,34 @@ function renderLobby() {
   for (const seg of $$('[data-room]')) {
     const val = String(room[seg.dataset.room]);
     for (const b of seg.children) b.classList.toggle('on', b.dataset.v === val);
-    seg.classList.toggle('locked', !isHost);
+    seg.classList.toggle('locked', !isHost || (room.isPublic && seg.dataset.room === 'mode'));
   }
   $('#btn-start').classList.toggle('hidden', !isHost);
   $('#btn-start').disabled = !!room.problem || room.state !== 'lobby';
   let info = '';
-  if (room.problem) info = room.problem;
+  if (room.resuming) info = '🔄 Neuer Gastgeber – warte kurz auf die anderen …';
+  else if (room.problem) info = room.problem;
+  else if (room.isPublic && room.autoStartIn > 0) info = `⚡ Geht automatisch los in ${Math.ceil(room.autoStartIn / 1000)} s`;
+  else if (room.isPublic && room.players.length === 1) info = '⚡ Öffentlicher Raum – warte auf Mitspieler … oder starte gleich gegen die KI.';
   else if (!isHost) info = 'Warte, bis der Gastgeber startet…';
   else if (room.players.length === 1) info = 'Lade Freunde mit dem Code oder dem Link ein – oder starte gleich gegen die KI.';
   else info = 'Alle bereit? Dann los!';
   $('#lobby-info').textContent = info;
+  $('#lobby-public').classList.toggle('hidden', !room.isPublic);
+  // Autostart-Countdown weiterzählen lassen
+  clearTimeout(lobbyTick);
+  if (room.isPublic && room.autoStartIn > 0 && room.state === 'lobby') {
+    const until = performance.now() + room.autoStartIn;
+    const tick = () => {
+      if (!room || room.state !== 'lobby' || $('#scr-lobby').classList.contains('hidden')) return;
+      const left = until - performance.now();
+      if (left > 0) {
+        $('#lobby-info').textContent = `⚡ Geht automatisch los in ${Math.ceil(left / 1000)} s`;
+        lobbyTick = setTimeout(tick, 250);
+      }
+    };
+    lobbyTick = setTimeout(tick, 250);
+  }
 }
 
 for (const b of $$('[data-team]')) {
@@ -1068,6 +1139,31 @@ $('#btn-share').addEventListener('click', async () => {
   } catch {
     $('#lobby-info').textContent = url;
   }
+});
+
+// ---------- Emojis ----------
+
+let lastEmote = 0;
+function sendEmote(i) {
+  if (!session || session.localIds.length !== 1 || session.kind === 'demo') return;
+  const now = performance.now();
+  if (now - lastEmote < 1200) return;
+  lastEmote = now;
+  if (session.kind === 'host' || session.kind === 'client') net.send({ t: 'emo', e: i });
+  else session.match.events.push({ type: 'emote', id: session.localIds[0], e: i, t: session.match.time });
+}
+$('#emotes').innerHTML = EMOTES.map((e, i) => `<button data-e="${i}" title="Taste ${i + 1}">${e}</button>`).join('');
+$('#emotes').addEventListener('pointerdown', (ev) => {
+  const b = ev.target.closest('button');
+  if (!b) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  sendEmote(+b.dataset.e);
+});
+window.addEventListener('keydown', (e) => {
+  if (e.target && e.target.tagName === 'INPUT') return;
+  const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
+  if (n >= 0) sendEmote(n);
 });
 
 // ---------- Deine Figur ----------

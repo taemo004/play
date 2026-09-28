@@ -116,6 +116,10 @@ export class Sfx {
       case 'lose':
         [392, 330, 262].forEach((f, i) => this.tone(f, 0.3, { type: 'triangle', vol: 0.2, delay: i * 0.15 }));
         break;
+      case 'pop':
+        this.tone(700, 0.08, { type: 'sine', vol: 0.18, to: 1200 });
+        this.tone(1400, 0.06, { type: 'triangle', vol: 0.08, delay: 0.05 });
+        break;
       case 'click':
         this.tone(900, 0.05, { type: 'square', vol: 0.06 });
         break;

@@ -154,3 +154,23 @@ function decide(m, p, brain) {
   brain.wander += (rng() - 0.5) * 0.8;
   return { x: go.x * sp + Math.cos(brain.wander) * 0.12, z: go.z * sp + Math.sin(brain.wander) * 0.12, dash: false };
 }
+
+// Kleine Emoji-Reaktionen der KI (online und offline), damit sie lebendiger wirkt.
+// Liefert zusätzliche 'emote'-Ereignisse; e ist der Index in EMOTES (room.js).
+export function botReactions(m, events, rng = Math.random) {
+  const out = [];
+  const bot = (id) => {
+    const p = m.players.find((pl) => pl.id === id);
+    return p && p.bot ? p : null;
+  };
+  for (const e of events) {
+    if (e.type === 'fall') {
+      if (e.by != null && bot(e.by) && rng() < 0.35) out.push({ type: 'emote', id: e.by, e: 1, t: m.time });
+      else if (bot(e.id) && rng() < 0.2) out.push({ type: 'emote', id: e.id, e: 2, t: m.time });
+    } else if (e.type === 'roundEnd' && e.winner < 2) {
+      const fan = m.players.find((p) => p.bot && p.team === e.winner && !p.out);
+      if (fan && rng() < 0.3) out.push({ type: 'emote', id: fan.id, e: 0, t: m.time });
+    }
+  }
+  return out;
+}

@@ -10,6 +10,9 @@ const TIMEOUT_MS = 12000;
 const CONNECT_TIMEOUT_MS = 8000;
 const HEARTBEAT_MS = 2000;
 const HOST_TIMEOUT_MS = 7000;
+const QUICK_SLOTS = 8; // öffentliche Räume QK01 … QK08 für „Schnelles Spiel“
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Optional eigener PeerJS-Server: ?peerhost=example.com&peerport=443&peerpath=/
 function peerOptions() {
@@ -50,6 +53,8 @@ export class Net {
     this.code = null;
     this.watchdog = null;
     this.pulse = null;
+    this.prevId = null; // alte Spieler-ID beim Wiederverbinden nach Gastgeber-Wechsel
+    this.isPublic = false;
   }
 
   get isHost() {
@@ -86,6 +91,8 @@ export class Net {
     this.id = null;
     this.code = null;
     this.pending = null;
+    this.prevId = null;
+    this.isPublic = false;
     this.closing = false;
   }
 
@@ -93,7 +100,7 @@ export class Net {
     this.close();
     for (let i = 0; i < 5; i++) {
       try {
-        return await this.startHost(makeCode());
+        return await this.startHost(makeCode(), false);
       } catch (e) {
         this.close();
         if (e.type !== 'unavailable-id') throw e;
@@ -112,6 +119,65 @@ export class Net {
         if (e.type === 'peer-unavailable') throw netError('not-found', `Raum „${code}“ wurde nicht gefunden.`);
         if ((e.type === 'timeout' || e.type === 'closed') && attempt < 1) continue;
         throw e;
+      }
+    }
+  }
+
+  // Schnelles Spiel: öffentliche Räume der Reihe nach probieren.
+  // Ist die Raum-ID frei, wird man selbst Gastgeber, sonst tritt man bei.
+  async quick() {
+    this.close();
+    let retries = 0;
+    for (let slot = 1; slot <= QUICK_SLOTS; slot++) {
+      const code = 'QK' + String(slot).padStart(2, '0');
+      try {
+        await this.startHost(code, true);
+        return;
+      } catch (e) {
+        this.close();
+        if (e.type !== 'unavailable-id') throw e;
+      }
+      try {
+        await this.joinAsClient(code);
+        return;
+      } catch (e) {
+        this.close();
+        // Gastgeber gerade weg oder Verbindung hängt → denselben Platz nochmal probieren
+        const retry = e.type === 'peer-unavailable' || e.type === 'timeout' || e.type === 'closed';
+        if (retry && retries++ < 3) slot--;
+        else if (e.type !== 'full' && !retry) throw e;
+      }
+    }
+    throw netError('full', 'Alle öffentlichen Räume sind voll. Erstelle einen eigenen Raum!');
+  }
+
+  // Gastgeber-Wechsel: Der Nachfolger übernimmt die Raum-ID, sobald der Vermittlungsserver sie freigibt
+  async takeOver(code, isPublic, settings, resume) {
+    this.close();
+    const until = Date.now() + 10000;
+    for (;;) {
+      try {
+        return await this.startHost(code, isPublic, { settings, resume });
+      } catch (e) {
+        this.close();
+        if (e.type !== 'unavailable-id' || Date.now() > until) throw e;
+        await sleep(600);
+      }
+    }
+  }
+
+  // Alle anderen treten demselben Raum wieder bei, sobald der neue Gastgeber da ist
+  async rejoin(code, prevId) {
+    this.close();
+    const until = Date.now() + 15000;
+    for (;;) {
+      try {
+        this.prevId = prevId;
+        return await this.joinAsClient(code);
+      } catch (e) {
+        this.close();
+        if (e.type === 'full' || Date.now() > until) throw e;
+        await sleep(800);
       }
     }
   }
@@ -138,12 +204,15 @@ export class Net {
     });
   }
 
-  async startHost(code) {
+  async startHost(code, isPublic = false, { settings = null, resume = null } = {}) {
     const peer = await this.openPeer(PREFIX + code);
     this.peer = peer;
-    const host = new RoomHost(code);
+    const host = new RoomHost(code, isPublic);
+    if (settings) host.applySettings(settings);
+    if (resume) host.setResume(resume);
     this.host = host;
     this.code = code;
+    this.isPublic = isPublic;
     peer.on('disconnected', () => {
       if (this.peer === peer && !peer.destroyed) peer.reconnect();
     });
@@ -156,7 +225,7 @@ export class Net {
       });
     });
     this.id = host.addClient((m) => queueMicrotask(() => this.onMessage(m)), true);
-    host.handle(this.id, { t: 'hello', name: this.getName(), look: this.getLook() });
+    host.handle(this.id, { t: 'hello', name: this.getName(), look: this.getLook(), prev: resume ? resume.myOldId : undefined });
   }
 
   async joinAsClient(code) {
@@ -192,8 +261,9 @@ export class Net {
         if (this.conn !== conn || this.closing) return;
         if (this.pending) this.pending.reject(netError('closed', 'Verbindung getrennt.'));
         else {
+          const info = { t: 'hostlost', code: this.code, myId: this.id };
           this.close();
-          this.emit({ t: 'hostlost' });
+          this.emit(info);
         }
       });
     });
@@ -210,7 +280,7 @@ export class Net {
     if (!m || typeof m.t !== 'string' || m.t === 'hb') return;
     if (m.t === 'welcome') {
       this.id = m.id;
-      if (!this.host) this.send({ t: 'hello', name: this.getName(), look: this.getLook() });
+      if (!this.host) this.send({ t: 'hello', name: this.getName(), look: this.getLook(), prev: this.prevId ?? undefined });
       return;
     }
     if (this.pending) {

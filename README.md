@@ -20,6 +20,13 @@ Läuft ohne Installation und ohne eigenen Server direkt im Browser (GitHub Pages
   Am PC: WASD + Leertaste gegen Pfeiltasten + Enter, auch mit zwei Gamepads.
 - **🌐 Online mit Freunden** – Raum erstellen, Link oder 4-stelligen Code teilen, bis zu 4 Spieler.
   1 gegen 1 oder 2 gegen 2, freie Plätze füllt auf Wunsch die KI. Wer die Partie verlässt, wird von der KI ersetzt.
+  - **⚡ Schnelles Spiel:** findet automatisch einen offenen öffentlichen Raum (`QK01` … `QK08`). Sobald zwei Spieler
+    da sind, startet die Partie nach 12 Sekunden von selbst; bei 3–4 Spielern wird es 2 gegen 2. Nach dem Ergebnis
+    geht es automatisch zurück in die Lobby.
+  - **Emojis:** 👍 😂 😡 😱 über der eigenen Figur (Knöpfe rechts oder Tasten 1–4). Auch die KI reagiert ab und zu.
+  - **Gastgeber-Wechsel:** Verlässt der Gastgeber den Raum (auch durch Schließen des Tabs), übernimmt automatisch
+    der nächste Spieler. Lief eine Partie, geht sie mit dem Spielstand weiter – die angefangene Runde startet neu,
+    der alte Gastgeber wird von der KI gespielt.
 
 ## Spielmechanik
 
@@ -90,7 +97,7 @@ z. B. `http://192.168.1.20:3000`.
 - Wer in Team Blau spielt, sieht die Arena gedreht, sodass die eigene Seite immer unten ist.
 
 **Einschränkungen:** Das Gastgeber-Fenster sollte im Vordergrund bleiben (Browser drosseln Hintergrund-Tabs).
-Verlässt der Gastgeber den Raum, endet das Spiel für alle. In sehr restriktiven Netzwerken (manche Firmen- und
+Bricht der Gastgeber ohne Abmeldung weg (Netz weg), merken das die anderen nach etwa 7 Sekunden. In sehr restriktiven Netzwerken (manche Firmen- und
 Schulnetze) kann eine direkte Verbindung scheitern.
 
 Optional kann ein eigener PeerJS-Server genutzt werden: `?peerhost=mein-server.de&peerport=443&peerpath=/`
