@@ -1,0 +1,14 @@
+{
+  "name": "sumo-smash",
+  "version": "1.0.0",
+  "description": "3D-Schubs-Duell fürs Handy (three.js) – 1 gegen 1 oder 2 gegen 2, gegen KI, zu zweit oder online",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
