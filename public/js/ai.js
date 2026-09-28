@@ -2,9 +2,9 @@
 import { CFG, ARENAS, safeRadius, isSolid } from './sim.js';
 
 export const DIFFICULTIES = {
-  easy: { label: 'Leicht', react: 0.42, aim: 0.6, dashRange: 3.0, dashProb: 0.4, margin: 0.3, dodge: 0, speed: 0.75, recover: 0.15, power: 0.3, careful: false },
-  normal: { label: 'Mittel', react: 0.24, aim: 0.3, dashRange: 3.6, dashProb: 0.7, margin: 0.9, dodge: 0.35, speed: 0.9, recover: 0.55, power: 0.6, careful: true },
-  hard: { label: 'Schwer', react: 0.12, aim: 0.12, dashRange: 4.1, dashProb: 1, margin: 1.3, dodge: 0.8, speed: 1, recover: 0.95, power: 0.9, careful: true },
+  easy: { label: 'Leicht', react: 0.42, aim: 0.6, dashRange: 3.0, dashProb: 0.4, margin: 0.3, dodge: 0, speed: 0.75, recover: 0.15, power: 0.3, careful: false, charge: 0 },
+  normal: { label: 'Mittel', react: 0.24, aim: 0.3, dashRange: 3.6, dashProb: 0.7, margin: 0.9, dodge: 0.35, speed: 0.9, recover: 0.55, power: 0.6, careful: true, charge: 0.12 },
+  hard: { label: 'Schwer', react: 0.12, aim: 0.12, dashRange: 4.1, dashProb: 1, margin: 1.3, dodge: 0.8, speed: 1, recover: 0.95, power: 0.9, careful: true, charge: 0.25 },
 };
 
 export function createBrain(diff, rng = Math.random) {
@@ -17,6 +17,19 @@ const norm = (x, z) => {
 };
 
 export function botThink(m, p, brain, dt) {
+  // Aufladen läuft über mehrere Schritte: halten, Ziel verfolgen, dann loslassen
+  if (brain.chargeFor > 0) {
+    const target = m.players.find((o) => o.id === brain.chargeTarget);
+    if (!target || target.doomed || target.out || p.stunT > 0 || p.falling || m.phase !== 'play') {
+      brain.chargeFor = 0;
+      return { x: 0, z: 0, dash: false };
+    }
+    brain.chargeFor -= dt;
+    const aim = norm(target.x + target.vx * 0.3 - p.x, target.z + target.vz * 0.3 - p.z);
+    if (brain.chargeFor > 0) return { x: aim.x * 0.4, z: aim.z * 0.4, dash: false, hold: true };
+    brain.t = brain.d.react;
+    return { x: aim.x, z: aim.z, dash: true, hold: false };
+  }
   brain.t -= dt;
   if (brain.t > 0) return { x: brain.x, z: brain.z, dash: false };
   const { d, rng } = brain;
@@ -53,7 +66,18 @@ function decide(m, p, brain) {
     return { x: home.x, z: home.z, dash };
   }
 
-  const enemies = m.players.filter((o) => o.team !== p.team && !o.doomed && !o.out);
+  let enemies = m.players.filter((o) => o.team !== p.team && !o.doomed && !o.out && !o.drop);
+  if (m.goal === 'huegel') {
+    // Hügel-Modus: nur Gegner in Hügelnähe sind wichtig, sonst den Hügel besetzen
+    const hillR = (CFG.HILL_RING + 0.5) * Math.sqrt(3) * CFG.TILE;
+    const near = enemies.filter((o) => Math.hypot(o.x, o.z) < hillR + 2.2);
+    if (!near.length || Math.hypot(p.x, p.z) > hillR + 3) {
+      const spot = { x: Math.cos(p.slot * 2.1) * 0.8, z: Math.sin(p.slot * 2.1) * 0.8 };
+      const go = norm(spot.x - p.x, spot.z - p.z);
+      if (near.length === 0 || go.l > 3) return { x: go.x * d.speed * Math.min(1, go.l), z: go.z * d.speed * Math.min(1, go.l), dash: false };
+    }
+    enemies = near;
+  }
   if (!enemies.length) return idle;
 
   // 2) Ausweichen, wenn ein Gegner auf einen zurast
@@ -97,6 +121,12 @@ function decide(m, p, brain) {
   if (outward.l < 0.6) outward = toT;
   const align = toT.x * outward.x + toT.z * outward.z;
   const targetEdge = Math.hypot(target.x, target.z) / Math.max(1, safeR);
+  // Ab und zu aus etwas Entfernung aufladen, wenn der Gegner nicht selbst gerade anstürmt
+  if (canDash && toT.l > 2.4 && toT.l < d.dashRange + 1 && target.dashT <= 0 && align > 0.2 && rng() < d.charge) {
+    brain.chargeFor = 0.35 + rng() * 0.5;
+    brain.chargeTarget = target.id;
+    return { x: toT.x * 0.4, z: toT.z * 0.4, dash: false, hold: true };
+  }
   if (canDash && toT.l < d.dashRange && (align > 0.35 || (targetEdge > 0.7 && align > 0)) && rng() < d.dashProb) {
     const lead = toT.l / CFG.DASH_SPEED;
     const ax = target.x + target.vx * lead + (rng() - 0.5) * d.aim * 2;

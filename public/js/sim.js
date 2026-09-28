@@ -42,7 +42,17 @@ export const CFG = {
   SHOCK_RADIUS: 4.5,
   SHOCK_KNOCK: 12,
   KO_WINDOW: 4, // so lange nach einem Treffer zählt ein Sturz als K.O. für den Angreifer
+  CHARGE_MAX: 0.9, // so lange lädt das Rammen maximal auf
+  CHARGE_SLOW: 0.35, // beim Aufladen läuft man langsamer
+  CHARGE_KNOCK: 0.8, // voll geladen: +80 % Wucht
+  CHARGE_SPEED: 0.3, // voll geladen: +30 % Sprint-Tempo
+  HILL_RING: 1, // Hügel = Mittelfeld und der Ring darum
+  HILL_TARGET: 12, // Sekunden auf dem Hügel für den Rundensieg
+  RESPAWN: 2.5, // Hügel-Modus: so lange dauert es bis zur Rückkehr
+  DROP_Y: 6, // Rückkehr fällt vom Himmel
 };
+
+export const GOALS = { sumo: 'Runterschubsen', huegel: 'Hügel halten' };
 
 export const PHASES = ['countdown', 'play', 'roundEnd', 'matchEnd'];
 
@@ -132,7 +142,7 @@ export function safeRadius(m) {
 // ---------- Spiel anlegen ----------
 
 // roster: [{ id, name, team (0|1), bot?: 'easy'|'normal'|'hard' }]
-export function createMatch({ roster, rings, winRounds = 3, arena = 'lava', seed = (Math.random() * 2 ** 32) >>> 0 }) {
+export function createMatch({ roster, rings, winRounds = 3, arena = 'lava', goal = 'sumo', seed = (Math.random() * 2 ** 32) >>> 0 }) {
   const teamSize = Math.max(...[0, 1].map((t) => roster.filter((p) => p.team === t).length));
   rings = rings || (teamSize > 1 ? 5 : 4);
   const tiles = buildTiles(rings);
@@ -145,6 +155,9 @@ export function createMatch({ roster, rings, winRounds = 3, arena = 'lava', seed
     seed,
     rng,
     arenaMode: mode,
+    goal: GOALS[goal] ? goal : 'sumo',
+    hill: [0, 0],
+    hillState: -1, // -1 frei, 0/1 Team hält ihn, 2 umkämpft
     arenaOrder: order,
     arena: mode === 'mix' ? order[0] : mode,
     angle: 0,
@@ -196,8 +209,17 @@ function makePlayer(r, slot) {
     stunT: 0,
     heavyT: 0,
     turboT: 0,
-    mass: 1,
-    radius: CFG.PR,
+    baseMass: r.mass > 0 ? r.mass : 1,
+    baseRadius: CFG.PR * (r.size > 0 ? r.size : 1),
+    mass: r.mass > 0 ? r.mass : 1,
+    radius: CFG.PR * (r.size > 0 ? r.size : 1),
+    charge: 0,
+    charging: false,
+    dashPower: 1,
+    respawnT: 0,
+    drop: false,
+    sx: 0,
+    sz: 0,
     falling: false,
     doomed: false,
     out: false,
@@ -232,15 +254,19 @@ export function startRound(m) {
   m.nextShrinkAt = CFG.SHRINK_START;
   m.powerups = [];
   m.nextPowerAt = CFG.POWER_FIRST;
+  m.hill = [0, 0];
+  m.hillState = -1;
   const spawnD = CFG.TILE * 1.5 * Math.ceil(m.rings * 0.6);
   for (const team of [0, 1]) {
     const members = m.players.filter((p) => p.team === team);
     const side = team === 0 ? 1 : -1; // Team Rot startet unten (+z), Blau oben (-z)
     members.forEach((p, k) => {
       const offset = (k - (members.length - 1) / 2) * 3.2;
+      p.sx = offset * side;
+      p.sz = spawnD * side;
       Object.assign(p, {
-        x: offset * side,
-        z: spawnD * side,
+        x: p.sx,
+        z: p.sz,
         y: 0,
         vx: 0,
         vy: 0,
@@ -253,8 +279,13 @@ export function startRound(m) {
         stunT: 0,
         heavyT: 0,
         turboT: 0,
-        mass: 1,
-        radius: CFG.PR,
+        mass: p.baseMass,
+        radius: p.baseRadius,
+        charge: 0,
+        charging: false,
+        dashPower: 1,
+        respawnT: 0,
+        drop: false,
         falling: false,
         doomed: false,
         out: false,
@@ -280,7 +311,7 @@ export function stepMatch(m, dt, inputs) {
     emit(m, 'go', {});
   }
   if (m.phase === 'play') {
-    updateShrink(m, dt);
+    if (m.goal !== 'huegel') updateShrink(m, dt); // beim Hügel-Modus bleibt die Arena ganz
     updatePowerups(m, dt);
   }
   updateSpin(m, dt);
@@ -290,6 +321,7 @@ export function stepMatch(m, dt, inputs) {
   updateSupport(m, dt);
   if (m.phase === 'play') {
     pickupPowerups(m);
+    if (m.goal === 'huegel') updateHill(m, dt);
     checkRoundEnd(m);
   } else if (m.phase === 'roundEnd' && m.phaseT >= m.roundEndLen) {
     if (m.matchWinner >= 0) {
@@ -408,8 +440,8 @@ function pickupPowerups(m) {
 function applyPower(m, p, type) {
   if (type === 'heavy') {
     p.heavyT = CFG.HEAVY_TIME;
-    p.mass = CFG.HEAVY_MASS;
-    p.radius = CFG.PR * CFG.HEAVY_SCALE;
+    p.mass = p.baseMass * CFG.HEAVY_MASS;
+    p.radius = p.baseRadius * CFG.HEAVY_SCALE;
   } else if (type === 'turbo') {
     p.turboT = CFG.TURBO_TIME;
     p.cool = Math.min(p.cool, CFG.TURBO_COOL);
@@ -449,8 +481,8 @@ function updatePlayers(m, dt, inputs, frozen) {
     if (p.heavyT > 0) {
       p.heavyT = Math.max(0, p.heavyT - dt);
       if (p.heavyT === 0) {
-        p.mass = 1;
-        p.radius = CFG.PR;
+        p.mass = p.baseMass;
+        p.radius = p.baseRadius;
       }
     }
     if (p.falling) continue;
@@ -479,6 +511,16 @@ function updatePlayers(m, dt, inputs, frozen) {
     }
 
     if (inp && inp.dash) p.dashBuf = CFG.DASH_BUFFER;
+    const holding = !!(inp && inp.hold);
+    // Aufladen: Taste halten (nur wenn Rammen bereit ist); loslassen löst den Stoß aus
+    if (holding && p.cool <= 0 && p.stunT <= 0 && p.dashT <= 0) {
+      p.charging = true;
+      p.charge = Math.min(CFG.CHARGE_MAX, p.charge + dt);
+    }
+    if (p.stunT > 0 || (!holding && p.dashBuf <= 0)) {
+      p.charging = false;
+      p.charge = 0;
+    }
     if (p.dashBuf > 0 && p.cool <= 0 && p.stunT <= CFG.STUN_DASH_OK && p.dashT <= 0) {
       let dx = p.fx;
       let dz = p.fz;
@@ -488,18 +530,22 @@ function updatePlayers(m, dt, inputs, frozen) {
         p.fx = dx;
         p.fz = dz;
       }
-      const sp = CFG.DASH_SPEED * (p.heavyT > 0 ? 0.85 : 1);
+      const frac = p.charge / CFG.CHARGE_MAX;
+      p.dashPower = 1 + CFG.CHARGE_KNOCK * frac;
+      p.charge = 0;
+      p.charging = false;
+      const sp = CFG.DASH_SPEED * (p.heavyT > 0 ? 0.85 : 1) * (1 + CFG.CHARGE_SPEED * frac);
       p.vx = dx * sp;
       p.vz = dz * sp;
       p.dashT = CFG.DASH_TIME;
       p.dashBuf = 0;
       p.stunT = 0;
       p.cool = p.turboT > 0 ? CFG.TURBO_COOL : CFG.DASH_COOL;
-      emit(m, 'dash', { id: p.id });
+      emit(m, 'dash', { id: p.id, charge: Math.round(frac * 100) / 100 });
     }
 
     if (p.dashT <= 0) {
-      const speed = CFG.SPEED * (p.heavyT > 0 ? 0.85 : 1);
+      const speed = CFG.SPEED * (p.heavyT > 0 ? 0.85 : 1) * (p.charging ? CFG.CHARGE_SLOW : 1);
       const tx = ix * speed;
       const tz = iz * speed;
       const arena = ARENAS[m.arena];
@@ -525,10 +571,10 @@ function collide(m) {
   const ps = m.players;
   for (let i = 0; i < ps.length; i++) {
     const a = ps[i];
-    if (a.out || a.y < -0.5) continue;
+    if (a.out || a.y < -0.5 || a.y > 0.5) continue;
     for (let j = i + 1; j < ps.length; j++) {
       const b = ps[j];
-      if (b.out || b.y < -0.5) continue;
+      if (b.out || b.y < -0.5 || b.y > 0.5) continue;
       let dx = b.x - a.x;
       let dz = b.z - a.z;
       let d = Math.hypot(dx, dz);
@@ -556,8 +602,8 @@ function collide(m) {
       const x = (a.x + b.x) / 2;
       const z = (a.z + b.z) / 2;
       if (aDash && bDash) {
-        const ka = CFG.CLASH_KNOCK * clamp(b.mass / a.mass, 0.4, 2.5);
-        const kb = CFG.CLASH_KNOCK * clamp(a.mass / b.mass, 0.4, 2.5);
+        const ka = CFG.CLASH_KNOCK * b.dashPower * clamp(b.mass / a.mass, 0.4, 2.5);
+        const kb = CFG.CLASH_KNOCK * a.dashPower * clamp(a.mass / b.mass, 0.4, 2.5);
         a.vx = -nx * ka;
         a.vz = -nz * ka;
         b.vx = nx * kb;
@@ -571,7 +617,7 @@ function collide(m) {
         const vic = aDash ? b : a;
         const sx = aDash ? nx : -nx;
         const sz = aDash ? nz : -nz;
-        const power = CFG.DASH_KNOCK * ARENAS[m.arena].knock * clamp(atk.mass / vic.mass, 0.4, 2.5);
+        const power = CFG.DASH_KNOCK * ARENAS[m.arena].knock * atk.dashPower * clamp(atk.mass / vic.mass, 0.4, 2.5);
         // Eigenbewegung des Opfers quer zum Stoß bleibt, die Komponente in Stoßrichtung wird ersetzt
         const along = vic.vx * sx + vic.vz * sz;
         const push = power + Math.max(0, along) * 0.3;
@@ -583,7 +629,7 @@ function collide(m) {
         vic.dashT = 0;
         stun(m, vic, atk, CFG.STUN_TIME);
         if (atk.team !== vic.team) atk.stats.hits++;
-        emit(m, 'hit', { a: atk.id, b: vic.id, x, z, power });
+        emit(m, 'hit', { a: atk.id, b: vic.id, x, z, power, charged: atk.dashPower > 1.5 });
       } else {
         const jn = ((1 + CFG.BUMP_E) * rv) / (ima + imb);
         a.vx -= jn * ima * nx;
@@ -602,7 +648,20 @@ function collide(m) {
 
 function updateSupport(m, dt) {
   for (const p of m.players) {
-    if (p.out) continue;
+    if (p.out) {
+      // Hügel-Modus: nach kurzer Zeit fällt man an seinem Startplatz wieder vom Himmel
+      if (m.goal === 'huegel' && m.phase === 'play' && (p.respawnT -= dt) <= 0) respawn(m, p);
+      continue;
+    }
+    if (p.drop) {
+      p.vy -= CFG.GRAVITY * 0.6 * dt;
+      p.y += p.vy * dt;
+      if (p.y <= 0) {
+        Object.assign(p, { y: 0, vy: 0, falling: false, drop: false });
+        emit(m, 'land', { id: p.id, x: p.x, z: p.z });
+      }
+      continue;
+    }
     const supported = isSolid(m, p.x, p.z);
     if (!p.falling) {
       if (!supported) {
@@ -637,14 +696,68 @@ function updateSupport(m, dt) {
       p.splashed = true;
       emit(m, 'splash', { id: p.id, x: p.x, z: p.z });
     }
-    if (p.y <= CFG.OUT_Y) p.out = true;
+    if (p.y <= CFG.OUT_Y) {
+      p.out = true;
+      p.respawnT = CFG.RESPAWN;
+    }
+  }
+}
+
+function respawn(m, p) {
+  Object.assign(p, {
+    x: p.sx,
+    z: p.sz,
+    y: CFG.DROP_Y,
+    vx: 0,
+    vy: 0,
+    vz: 0,
+    fx: 0,
+    fz: p.team === 0 ? -1 : 1,
+    dashT: 0,
+    stunT: 0,
+    heavyT: 0,
+    turboT: 0,
+    mass: p.baseMass,
+    radius: p.baseRadius,
+    charge: 0,
+    charging: false,
+    falling: true,
+    drop: true,
+    doomed: false,
+    out: false,
+    splashed: false,
+    lastHitBy: null,
+  });
+  emit(m, 'respawn', { id: p.id });
+}
+
+// Wer steht auf dem Hügel? Punkte gibt es nur, wenn ein Team ihn allein hält.
+function updateHill(m, dt) {
+  const on = [false, false];
+  for (const p of m.players) {
+    if (p.out || p.falling) continue;
+    const t = tileAt(m, p.x, p.z);
+    if (t && t.ring <= CFG.HILL_RING && t.state !== 2) on[p.team] = true;
+  }
+  const state = on[0] && on[1] ? 2 : on[0] ? 0 : on[1] ? 1 : -1;
+  if (state === 0 || state === 1) m.hill[state] = Math.min(CFG.HILL_TARGET, m.hill[state] + dt);
+  if (state !== m.hillState) {
+    m.hillState = state;
+    emit(m, 'hill', { state });
   }
 }
 
 function checkRoundEnd(m) {
-  const standing = [0, 1].map((team) => m.players.some((p) => p.team === team && !p.doomed));
-  if (standing[0] && standing[1] && m.phaseT < CFG.ROUND_LIMIT) return;
-  const winner = standing[0] && !standing[1] ? 0 : standing[1] && !standing[0] ? 1 : 2;
+  let winner;
+  if (m.goal === 'huegel') {
+    const done = m.hill[0] >= CFG.HILL_TARGET || m.hill[1] >= CFG.HILL_TARGET;
+    if (!done && m.phaseT < CFG.ROUND_LIMIT) return;
+    winner = m.hill[0] > m.hill[1] ? 0 : m.hill[1] > m.hill[0] ? 1 : 2;
+  } else {
+    const standing = [0, 1].map((team) => m.players.some((p) => p.team === team && !p.doomed));
+    if (standing[0] && standing[1] && m.phaseT < CFG.ROUND_LIMIT) return;
+    winner = standing[0] && !standing[1] ? 0 : standing[1] && !standing[0] ? 1 : 2;
+  }
   m.roundWinner = winner;
   // Entscheidender Sturz durch einen Stoß? Dann gibt es eine Zeitlupen-Wiederholung
   const decisive = m.events.filter((e) => e.type === 'fall' && e.t === m.time && e.by != null).pop();
@@ -672,6 +785,7 @@ const F_TURBO = 8;
 const F_FALL = 16;
 const F_DOOM = 32;
 const F_OUT = 64;
+const F_CHARGE = 128;
 const r2 = (v) => Math.round(v * 100) / 100;
 
 export function tilesString(m) {
@@ -694,6 +808,8 @@ export function encodeSnap(m, withTiles) {
     ns: r2(m.nextShrinkAt),
     ar: ARENA_IDS.indexOf(m.arena),
     an: Math.round(m.angle * 1000) / 1000,
+    hl: m.hill.map((v) => Math.round(v * 10) / 10),
+    hs: m.hillState,
     p: m.players.map((p) => [
       r2(p.x),
       r2(p.z),
@@ -706,10 +822,12 @@ export function encodeSnap(m, withTiles) {
         (p.turboT > 0 ? F_TURBO : 0) |
         (p.falling ? F_FALL : 0) |
         (p.doomed ? F_DOOM : 0) |
-        (p.out ? F_OUT : 0),
+        (p.out ? F_OUT : 0) |
+        (p.charging ? F_CHARGE : 0),
       r2(p.cool),
       r2(Math.max(p.heavyT, p.turboT)),
       p.stats.ko,
+      r2(p.charge),
     ]),
     pu: m.powerups.map((pu) => [pu.id, POWER_TYPES.indexOf(pu.type), r2(pu.x), r2(pu.z)]),
   };
@@ -737,6 +855,8 @@ export function applySnap(m, a, b, alpha, only = null) {
   m.outerRing = s.or;
   m.nextShrinkAt = s.ns;
   if (ARENA_IDS[s.ar]) m.arena = ARENA_IDS[s.ar];
+  if (s.hl) m.hill = s.hl;
+  if (s.hs !== undefined) m.hillState = s.hs;
   m.angle = a.ar === b.ar && Number.isFinite(a.an) && Number.isFinite(b.an) ? lerp(a.an, b.an) : s.an || 0;
   m.powerups = s.pu.map(([id, type, x, z]) => ({ id, type: POWER_TYPES[type], x, z, life: 1 }));
 }
@@ -760,7 +880,10 @@ function applyPlayer(p, pa, pb, alpha, a, b) {
   p.stunT = f & F_STUN ? 0.1 : 0;
   p.heavyT = f & F_HEAVY ? near[7] : 0;
   p.turboT = f & F_TURBO ? near[7] : 0;
-  p.radius = p.heavyT > 0 ? CFG.PR * CFG.HEAVY_SCALE : CFG.PR;
+  p.radius = p.heavyT > 0 ? p.baseRadius * CFG.HEAVY_SCALE : p.baseRadius;
+  p.charging = !!(f & F_CHARGE);
+  p.charge = near[9] || 0;
+  p.drop = p.falling && p.y > 0;
   p.falling = !!(f & F_FALL);
   p.doomed = !!(f & F_DOOM);
   p.out = !!(f & F_OUT);

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de" data-v="2">
+<html lang="de" data-v="3">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="style.css?v=2" />
+  <link rel="stylesheet" href="style.css?v=3" />
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -21,7 +21,7 @@
   <div id="hud" class="hidden">
     <div class="scorebar">
       <div class="team t0"><span class="tname">ROT</span><span class="dots" id="dots0"></span></div>
-      <div class="mid"><div id="round-lbl">Runde 1</div><div id="shrink-lbl"></div></div>
+      <div class="mid"><div id="round-lbl">Runde 1</div><div id="hill-bar" class="hidden"><i class="h0"></i><i class="h1"></i></div><div id="shrink-lbl"></div></div>
       <div class="team t1"><span class="dots" id="dots1"></span><span class="tname">BLAU</span></div>
     </div>
     <div id="banner"><div class="b b1"></div><div class="b b2"></div></div>
@@ -45,6 +45,7 @@
         <input id="in-name" class="name-in" maxlength="14" placeholder="Spieler" autocomplete="off" />
       </label>
       <div class="menu-buttons">
+        <button class="btn big gold" data-go="scr-tour">🏆 Turnier</button>
         <button class="btn big" data-go="scr-ai">🤖 Gegen KI</button>
         <button class="btn big" data-go="scr-local">👥 Zu zweit an einem Handy</button>
         <button class="btn big accent" data-go="scr-online">🌐 Online mit Freunden</button>
@@ -67,6 +68,9 @@
       <div class="field"><span>Schwierigkeit</span>
         <div class="seg" data-set="aiDiff"><button data-v="easy">Leicht</button><button data-v="normal">Mittel</button><button data-v="hard">Schwer</button></div>
       </div>
+      <div class="field"><span>Spielziel</span>
+        <div class="seg" data-set="aiGoal"><button data-v="sumo">🥊 Runterschubsen</button><button data-v="huegel">⛰️ Hügel halten</button></div>
+      </div>
       <div class="field"><span>Arena</span>
         <div class="seg arena-seg" data-set="aiArena"><button data-v="lava">🌋 Vulkan</button><button data-v="eis">🧊 Gletscher</button><button data-v="dreh">🎠 Karussell</button><button data-v="mix">🎲 Wechselnd</button></div>
       </div>
@@ -86,6 +90,9 @@
       </div>
       <div class="field" data-show="localMode=2v2"><span>Stärke der KI-Partner</span>
         <div class="seg" data-set="localDiff"><button data-v="easy">Leicht</button><button data-v="normal">Mittel</button><button data-v="hard">Schwer</button></div>
+      </div>
+      <div class="field"><span>Spielziel</span>
+        <div class="seg" data-set="localGoal"><button data-v="sumo">🥊 Runterschubsen</button><button data-v="huegel">⛰️ Hügel halten</button></div>
       </div>
       <div class="field"><span>Arena</span>
         <div class="seg arena-seg" data-set="localArena"><button data-v="lava">🌋 Vulkan</button><button data-v="eis">🧊 Gletscher</button><button data-v="dreh">🎠 Karussell</button><button data-v="mix">🎲 Wechselnd</button></div>
@@ -139,6 +146,9 @@
         <div class="field"><span>Stärke der KI</span>
           <div class="seg" data-room="diff"><button data-v="easy">Leicht</button><button data-v="normal">Mittel</button><button data-v="hard">Schwer</button></div>
         </div>
+        <div class="field"><span>Spielziel</span>
+          <div class="seg" data-room="goal"><button data-v="sumo">🥊 Runterschubsen</button><button data-v="huegel">⛰️ Hügel halten</button></div>
+        </div>
         <div class="field"><span>Arena</span>
         <div class="seg arena-seg" data-room="arena"><button data-v="lava">🌋 Vulkan</button><button data-v="eis">🧊 Gletscher</button><button data-v="dreh">🎠 Karussell</button><button data-v="mix">🎲 Wechselnd</button></div>
         </div>
@@ -147,6 +157,17 @@
       <p id="lobby-info" class="hint small"></p>
       <button id="btn-start" class="btn big accent">Spiel starten</button>
       <button id="btn-leave" class="btn ghost">Raum verlassen</button>
+    </div>
+  </section>
+
+  <!-- Turnier -->
+  <section id="scr-tour" class="screen hidden">
+    <div class="panel wide">
+      <h2>🏆 Turnier</h2>
+      <ol id="tour-list" class="tour-list"></ol>
+      <p id="tour-info" class="hint small center"></p>
+      <button id="btn-tour-start" class="btn big accent">Turnier starten</button>
+      <button class="btn ghost" data-go="scr-menu">← Zurück</button>
     </div>
   </section>
 
@@ -169,14 +190,19 @@
       <h2>❓ So geht's</h2>
       <ul>
         <li><b>Ziel:</b> Schubs alle Gegner von der Arena in die Lava. Wer zuerst <b>3 Runden</b> gewinnt, holt den Sieg.</li>
+        <li><b>Aufladen:</b> Halte die Ramm-Taste gedrückt – du wirst langsamer, aber beim Loslassen rammst du mit bis zu
+          fast doppelter Wucht. Voll geladen blinkt deine Figur weiß.</li>
         <li><b>Laufen:</b> auf der linken Bildschirmhälfte wischen (Tastatur: WASD / Pfeile).</li>
-        <li><b>Rammen:</b> rechte Hälfte antippen (Leertaste). Wer beim Rammen trifft, schleudert den Gegner weg –
+        <li><b>Rammen:</b> rechte Hälfte antippen und loslassen (Leertaste). Wer beim Rammen trifft, schleudert den Gegner weg –
           danach braucht der Sprint kurz zum Aufladen.</li>
         <li><b>Frontal:</b> Rammen beide gleichzeitig ineinander, prallen beide ab.</li>
         <li><b>Retten:</b> Nach einem Treffer rutschst du. Kurz vor der Kante noch einmal zur Mitte rammen kann dich retten!</li>
         <li><b>Die Arena bröckelt:</b> Nach 12 Sekunden fällt Ring für Ring weg. Glühende Felder brechen gleich ab.</li>
         <li><b>Power-ups:</b> 🪨 Koloss – schwer und groß, kaum wegzuschubsen · ⚡ Turbo – Rammen lädt blitzschnell ·
           💥 Schockwelle – stößt alle Gegner in der Nähe weg.</li>
+        <li><b>⛰️ Hügel halten:</b> Das goldene Feld in der Mitte ist der Hügel. Steht nur dein Team darauf, füllt sich
+          euer Balken – nach 12 Sekunden gewinnt ihr die Runde. Wer runterfällt, kommt nach kurzer Zeit vom Himmel zurück.</li>
+        <li><b>🏆 Turnier:</b> Fünf Gegner nacheinander, jeder mit eigenem Stil – am Ende wartet der riesige Yokozuna.</li>
         <li><b>Arenen:</b> 🌋 Vulkan ist der Klassiker. 🧊 Auf dem Gletscher rutschst du lange nach – früh bremsen!
           🎠 Das Karussell dreht sich immer schneller und zieht dich nach außen. 🎲 Wechselnd: jede Runde eine andere.</li>
         <li><b>Wiederholung:</b> Entscheidet ein Stoß die Runde, siehst du ihn noch einmal in Zeitlupe. Tippen überspringt sie.</li>
@@ -213,19 +239,20 @@
   {
     "imports": {
       "three": "./vendor/three.min.js?v=0.186.1",
-      "./js/main.js": "./js/main.js?v=2",
-      "./js/sim.js": "./js/sim.js?v=2",
-      "./js/ai.js": "./js/ai.js?v=2",
-      "./js/room.js": "./js/room.js?v=2",
-      "./js/net.js": "./js/net.js?v=2",
-      "./js/render.js": "./js/render.js?v=2",
-      "./js/input.js": "./js/input.js?v=2",
-      "./js/audio.js": "./js/audio.js?v=2",
-      "./js/looks.js": "./js/looks.js?v=2",
-      "./js/version.js": "./js/version.js?v=2"
+      "./js/main.js": "./js/main.js?v=3",
+      "./js/sim.js": "./js/sim.js?v=3",
+      "./js/ai.js": "./js/ai.js?v=3",
+      "./js/room.js": "./js/room.js?v=3",
+      "./js/net.js": "./js/net.js?v=3",
+      "./js/render.js": "./js/render.js?v=3",
+      "./js/input.js": "./js/input.js?v=3",
+      "./js/audio.js": "./js/audio.js?v=3",
+      "./js/looks.js": "./js/looks.js?v=3",
+      "./js/tourney.js": "./js/tourney.js?v=3",
+      "./js/version.js": "./js/version.js?v=3"
     }
   }
   </script>
-  <script type="module" src="js/main.js?v=2"></script>
+  <script type="module" src="js/main.js?v=3"></script>
 </body>
 </html>

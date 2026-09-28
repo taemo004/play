@@ -197,6 +197,7 @@ export class Renderer {
     this.tmpV = new THREE.Vector3();
     this.tmpS = new THREE.Vector3();
     this.tmpC = new THREE.Color();
+    this.tmpC2 = new THREE.Color();
 
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -322,6 +323,21 @@ export class Renderer {
       spin: 1 + Math.random() * 2,
     }));
     this.arena.add(this.tileMesh);
+    // Hügel-Modus: leuchtender Ring um den Hügel
+    if (this.hillRing) {
+      this.arena.remove(this.hillRing);
+      this.hillRing = null;
+    }
+    if (view.goal === 'huegel') {
+      const r = (CFG.HILL_RING + 0.55) * SQRT3 * CFG.TILE;
+      this.hillRing = new THREE.Mesh(
+        new THREE.RingGeometry(r - 0.16, r, 64),
+        new THREE.MeshBasicMaterial({ color: '#ffd166', transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false, side: THREE.DoubleSide }),
+      );
+      this.hillRing.rotation.x = -Math.PI / 2;
+      this.hillRing.position.y = 0.03;
+      this.arena.add(this.hillRing);
+    }
     this.applyTheme(view.arena || 'lava');
   }
 
@@ -441,7 +457,11 @@ export class Renderer {
         break;
       }
       case 'hit': {
-        const k = Math.min(1.2, e.power / CFG.DASH_KNOCK);
+        const k = Math.min(2, e.power / CFG.DASH_KNOCK);
+        if (e.charged) {
+          this.ring(e.x, 0.4, e.z, '#ffe14d', 0.6, 5.5, 0.5);
+          this.burst(e.x, 0.8, e.z, ['#ffe14d', '#ffffff'], 26, 10, 6, 0.24, 0.7);
+        }
         this.burst(e.x, 0.7, e.z, ['#ffffff', '#ffe14d', '#ff9f1c'], 22, 7 * k, 4, 0.2, 0.55);
         this.ring(e.x, 0.3, e.z, '#ffffff', 0.4, 3.2 * k, 0.35);
         this.shake = Math.max(this.shake, 0.35 * k);
@@ -481,6 +501,11 @@ export class Renderer {
         break;
       case 'shrink':
         this.shake = Math.max(this.shake, 0.08);
+        break;
+      case 'land':
+        this.burst(e.x, 0.1, e.z, ['#ffffff', '#f3e0c8'], 14, 4, 1.5, 0.18, 0.5);
+        this.ring(e.x, 0.05, e.z, '#ffffff', 0.4, 2.2, 0.35);
+        this.shake = Math.max(this.shake, 0.12);
         break;
       default:
     }
@@ -537,6 +562,13 @@ export class Renderer {
       let rz = 0;
       let sc = 1;
       tmpC.copy(fx.base);
+      if (view.goal === 'huegel' && t.ring <= CFG.HILL_RING && t.state === 0) {
+        // Hügel: golden, in Teamfarbe wenn gehalten, flackernd wenn umkämpft
+        tmpC.set('#ffd166');
+        const hs = view.hillState;
+        if (hs === 0 || hs === 1) tmpC.lerp(this.tmpC2.set(TEAM_COLORS[hs]), 0.55 + Math.sin(this.time * 6) * 0.15);
+        else if (hs === 2) tmpC.lerp(this.tmpC2.set('#ffffff'), 0.3 + Math.sin(this.time * 20) * 0.3);
+      }
       if (t.state === 1) {
         const k = Math.min(1, fx.since / CFG.CRUMBLE_TIME);
         const amp = 0.02 + k * 0.07;
@@ -570,7 +602,7 @@ export class Renderer {
       if (!o) continue;
       const visible = !p.out;
       o.group.visible = visible;
-      o.ground.visible = visible && !p.falling;
+      o.ground.visible = visible && (!p.falling || p.drop);
       if (!visible) continue;
       const R = p.radius;
       // Drehung zur Blickrichtung (kürzester Weg)
@@ -585,6 +617,18 @@ export class Renderer {
       let sx = 1 + bob * 0.5;
       let sy = 1 - bob;
       let sz = 1 + bob * 0.5;
+      const chg = p.charging ? Math.min(1, p.charge / CFG.CHARGE_MAX) : 0;
+      if (chg > 0) {
+        // Aufladen: Figur duckt sich und zittert immer stärker
+        const wob = Math.sin(this.time * (30 + chg * 30)) * 0.04 * chg;
+        sx = 1 + chg * 0.14 + wob;
+        sy = 1 - chg * 0.16;
+        sz = 1 + chg * 0.14 - wob;
+        if (Math.random() < 0.3 + chg * 0.5) {
+          const a = Math.random() * Math.PI * 2;
+          this.spawn(p.x + Math.cos(a) * R * 1.3, p.y + 0.2, p.z + Math.sin(a) * R * 1.3, -Math.cos(a) * 2, 2 + chg * 3, -Math.sin(a) * 2, 0.35, 0.12 + chg * 0.1, chg > 0.95 ? '#ffffff' : '#ffe14d', 4);
+        }
+      }
       if (dashing) {
         sx = 0.82;
         sy = 0.86;
@@ -606,7 +650,7 @@ export class Renderer {
           const a = this.time * 22 + e.s;
           e.pupil.position.set(e.s * 0.32 + Math.cos(a) * 0.07, 0.32 + Math.sin(a) * 0.07, 1.04);
         } else e.pupil.position.set(e.s * 0.32, 0.32, 1.06);
-        const angry = dashing || p.cool > 0.8;
+        const angry = dashing || p.cool > 0.8 || chg > 0;
         e.brow.rotation.z = angry ? -e.s * 0.45 : -e.s * 0.1;
         e.brow.position.y = angry ? 0.56 : 0.62;
       }
@@ -614,6 +658,7 @@ export class Renderer {
       o.flash = Math.max(0, o.flash - dt);
       const em = o.bodyMat.emissive;
       if (o.flash > 0) em.set('#ffffff').multiplyScalar(o.flash * 4);
+      else if (chg > 0) em.set(chg > 0.95 ? '#ffffff' : '#ffb830').multiplyScalar(chg * (0.35 + 0.25 * Math.sin(this.time * 25)));
       else if (p.turboT > 0) em.set('#ffe14d').multiplyScalar(0.25 + 0.2 * Math.sin(this.time * 18));
       else if (p.heavyT > 0) em.set('#ff9f1c').multiplyScalar(0.18);
       else em.set(0);
@@ -786,7 +831,9 @@ export function buildSumo(team, look = {}) {
   group.add(inner);
   const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.42, metalness: 0.02, emissive: new THREE.Color(0) });
   inner.add(new THREE.Mesh(new THREE.SphereGeometry(1, 32, 22), bodyMat));
-  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.97, 0.14, 10, 32), mat(dark, { roughness: 0.6 }));
+  const gold = look.extra === 'goldguertel';
+  const beltMat = gold ? mat('#ffc83d', { metalness: 0.8, roughness: 0.25, emissive: new THREE.Color('#4a3000') }) : mat(dark, { roughness: 0.6 });
+  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.97, gold ? 0.17 : 0.14, 10, 32), beltMat);
   belt.rotation.x = Math.PI / 2;
   belt.position.y = -0.25;
   inner.add(belt);
@@ -815,6 +862,12 @@ export function buildSumo(team, look = {}) {
   }
   const extra = buildExtra(look.extra);
   if (extra) inner.add(extra);
+  if (gold) {
+    const buckle = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.08, 20), beltMat);
+    buckle.rotation.x = Math.PI / 2;
+    buckle.position.set(0, -0.25, 0.99);
+    inner.add(buckle);
+  }
   return { group, inner, bodyMat, color, eyes, hat };
 }
 
