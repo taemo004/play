@@ -4,7 +4,7 @@
 
 import { createMatch, stepMatch, encodeSnap, ARENA_MODES, GOALS } from './sim.js';
 import { sanitizeLook, randomLook } from './looks.js';
-import { createBrain, botThink, DIFFICULTIES } from './ai.js';
+import { createBrain, botThink, botReactions, DIFFICULTIES } from './ai.js';
 
 export const MAX_PLAYERS = 4;
 const STEP = 1 / 60;
@@ -12,6 +12,11 @@ const SNAP_EVERY = 1 / 30;
 const TILES_EVERY = 30; // Feldzustand spätestens jeden 30. Schnappschuss mitschicken
 const HEARTBEAT_MS = 2000;
 const CLIENT_TIMEOUT_MS = 8000;
+const AUTOSTART_MS = 12000; // öffentliche Räume starten von selbst, sobald 2 Spieler da sind
+const PUBLIC_RESULT_S = 9; // danach geht ein öffentlicher Raum zurück in die Lobby
+const RESUME_WAIT_MS = 6000; // Gastgeber-Wechsel: so lange auf zurückkehrende Spieler warten
+const EMOTE_GAP_MS = 1200;
+export const EMOTES = ['👍', '😂', '😡', '😱'];
 const BOT_NAMES = ['Knödel', 'Dampfwalze', 'Moppel', 'Brocken', 'Wackelpudding', 'Kugelblitz', 'Donnerbauch', 'Pfannkuchen'];
 
 export function sanitizeName(name) {
@@ -36,8 +41,12 @@ export function buildRoster(humans, mode, fill, diff, rng = Math.random) {
 }
 
 export class RoomHost {
-  constructor(code) {
+  constructor(code, isPublic = false) {
     this.code = code;
+    this.isPublic = isPublic;
+    this.autoStartAt = 0;
+    this.autoTimer = null;
+    this.resume = null;
     this.nextId = 1;
     this.clients = new Map(); // id -> { id, send, local, name, team, inRoom, lastSeen }
     this.hostId = null;
@@ -64,7 +73,86 @@ export class RoomHost {
   destroy() {
     this.dead = true;
     clearInterval(this.heartbeat);
+    clearTimeout(this.autoTimer);
+    if (this.resume) clearTimeout(this.resume.timer);
     this.clients.clear();
+  }
+
+  // Einstellungen vom vorherigen Gastgeber übernehmen
+  applySettings(st = {}) {
+    if (st.mode === '1v1' || st.mode === '2v2') this.mode = st.mode;
+    if (typeof st.fill === 'boolean') this.fill = st.fill;
+    if (DIFFICULTIES[st.diff]) this.diff = st.diff;
+    if (ARENA_MODES.includes(st.arena)) this.arena = st.arena;
+    if (GOALS[st.goal]) this.goal = st.goal;
+  }
+
+  // Gastgeber-Wechsel mitten in der Partie: auf die anderen warten, dann mit Spielstand weiterspielen.
+  // resume: { roster, score, round, winRounds, arena, goal, oldHostId, myOldId }
+  setResume(resume) {
+    const expected = new Set(resume.roster.filter((r) => !r.bot && r.id !== resume.oldHostId && r.id !== resume.myOldId).map((r) => r.id));
+    this.resume = { ...resume, expected };
+    this.resume.timer = setTimeout(() => this.startResume(), RESUME_WAIT_MS);
+    if (this.resume.timer.unref) this.resume.timer.unref();
+  }
+
+  checkResume() {
+    if (!this.resume) return;
+    const back = new Set(this.players.map((p) => p.prev));
+    if ([...this.resume.expected].every((id) => back.has(id))) this.startResume();
+  }
+
+  startResume() {
+    const r = this.resume;
+    if (!r || this.dead) return;
+    clearTimeout(r.timer);
+    this.resume = null;
+    const byPrev = new Map(this.players.filter((p) => p.prev != null).map((p) => [p.prev, p]));
+    let botId = 200;
+    const roster = r.roster.map((e) => {
+      const c = !e.bot && byPrev.get(e.id);
+      if (c) {
+        c.team = e.team;
+        return { id: c.id, name: c.name, team: e.team, look: c.look };
+      }
+      // Wer nicht zurückkam (auch der alte Gastgeber), wird von der KI gespielt
+      return { id: botId++, name: e.bot ? e.name : `${e.name} (KI)`, team: e.team, bot: e.bot || this.diff, look: e.look, size: e.size, mass: e.mass };
+    });
+    this.startMatch({ roster, startAt: { score: r.score, round: r.round }, winRounds: r.winRounds, arena: r.arena, goal: r.goal });
+  }
+
+  // Öffentliche Räume: Modus nach Spielerzahl, Autostart sobald 2 Spieler da sind
+  updateAutoStart() {
+    if (!this.isPublic || this.dead) return;
+    if (this.state !== 'lobby' || this.players.length < 2 || this.resume) {
+      clearTimeout(this.autoTimer);
+      this.autoTimer = null;
+      this.autoStartAt = 0;
+      return;
+    }
+    const mode = this.players.length > 2 ? '2v2' : '1v1';
+    if (mode !== this.mode) {
+      this.mode = mode;
+      this.rebalance();
+    }
+    if (this.autoTimer) return;
+    this.autoStartAt = Date.now() + AUTOSTART_MS;
+    this.autoTimer = setTimeout(() => {
+      this.autoTimer = null;
+      this.autoStartAt = 0;
+      if (this.state === 'lobby' && this.players.length >= 2 && !this.problem()) this.startMatch();
+      else this.updateAutoStart();
+    }, AUTOSTART_MS);
+    if (this.autoTimer.unref) this.autoTimer.unref();
+  }
+
+  backToLobby() {
+    this.state = 'lobby';
+    this.match = null;
+    this.rebalance();
+    this.broadcast({ t: 'lobby' });
+    this.updateAutoStart();
+    this.broadcastRoom();
   }
 
   pulse() {
@@ -80,7 +168,7 @@ export class RoomHost {
   }
 
   addClient(send, local = false) {
-    const c = { id: this.nextId++, send, local, lastSeen: Date.now(), name: 'Spieler', look: sanitizeLook(null), team: 0, inRoom: false };
+    const c = { id: this.nextId++, send, local, lastSeen: Date.now(), name: 'Spieler', look: sanitizeLook(null), team: 0, inRoom: false, prev: null, lastEmo: 0 };
     this.clients.set(c.id, c);
     send({ t: 'welcome', id: c.id });
     return c.id;
@@ -99,6 +187,7 @@ export class RoomHost {
       this.brains.set(id, createBrain(this.diff, this.match.rng));
       this.match.events.push({ type: 'left', id, t: this.match.time });
     }
+    this.updateAutoStart();
     this.broadcastRoom();
   }
 
@@ -114,6 +203,9 @@ export class RoomHost {
     return {
       t: 'room',
       code: this.code,
+      isPublic: this.isPublic,
+      autoStartIn: this.autoStartAt ? Math.max(0, this.autoStartAt - Date.now()) : 0,
+      resuming: !!this.resume,
       hostId: this.hostId,
       state: this.state,
       mode: this.mode,
@@ -163,15 +255,19 @@ export class RoomHost {
       case 'hello': {
         c.name = sanitizeName(msg.name);
         c.look = sanitizeLook(msg.look);
+        if (Number.isInteger(msg.prev)) c.prev = msg.prev;
         if (c.inRoom) return this.broadcastRoom();
         if (this.players.length >= MAX_PLAYERS) return c.send({ t: 'error', code: 'full', msg: 'Der Raum ist voll (max. 4 Spieler).' });
         if (this.hostId == null) this.hostId = id;
-        if (this.players.length >= 2 && this.mode === '1v1' && this.state === 'lobby') this.mode = '2v2';
-        c.team = this.teamCount(1) < this.teamCount(0) ? 1 : 0;
+        if (this.players.length >= 2 && this.mode === '1v1' && this.state === 'lobby' && !this.resume) this.mode = '2v2';
+        const old = this.resume && this.resume.roster.find((r) => r.id === c.prev && !r.bot);
+        c.team = old ? old.team : this.teamCount(1) < this.teamCount(0) ? 1 : 0;
         c.inRoom = true;
-        c.send({ t: 'joined', id });
+        c.send({ t: 'joined', id, state: this.state });
+        this.updateAutoStart();
         this.broadcastRoom();
         if (this.state === 'match' && this.match) c.send(this.startMsg());
+        this.checkResume();
         return;
       }
       case 'team': {
@@ -180,9 +276,19 @@ export class RoomHost {
         if (team !== c.team && this.teamCount(team) < teamSizeOf(this.mode)) c.team = team;
         return this.broadcastRoom();
       }
+      case 'emo': {
+        // Emoji über der eigenen Figur – kurz gebremst, damit niemand spammt
+        const e = msg.e | 0;
+        const now = Date.now();
+        if (!this.match || e < 0 || e >= EMOTES.length || now - c.lastEmo < EMOTE_GAP_MS) return;
+        if (!this.match.players.some((p) => p.id === id)) return;
+        c.lastEmo = now;
+        this.match.events.push({ type: 'emote', id, e, t: this.match.time });
+        return;
+      }
       case 'settings': {
         if (!isHost || this.state !== 'lobby') return;
-        if (msg.mode === '1v1' || msg.mode === '2v2') {
+        if ((msg.mode === '1v1' || msg.mode === '2v2') && !this.isPublic) {
           if (msg.mode === '1v1' && this.players.length > 2) {
             c.send({ t: 'toast', msg: 'Für 1 gegen 1 sind zu viele Spieler im Raum.' });
           } else this.mode = msg.mode;
@@ -206,11 +312,7 @@ export class RoomHost {
       }
       case 'lobby': {
         if (!isHost || this.state !== 'match') return;
-        this.state = 'lobby';
-        this.match = null;
-        this.rebalance();
-        this.broadcast({ t: 'lobby' });
-        return this.broadcastRoom();
+        return this.backToLobby();
       }
       case 'in': {
         if (!this.match) return;
@@ -231,9 +333,18 @@ export class RoomHost {
     return { t: 'start', roster: this.roster, rings: this.match.rings, winRounds: this.match.winRounds, arena: this.match.arenaMode, goal: this.match.goal };
   }
 
-  startMatch() {
-    this.roster = buildRoster(this.players, this.mode, this.fill, this.diff);
-    this.match = createMatch({ roster: this.roster, arena: this.arena, goal: this.goal });
+  startMatch(resume = null) {
+    clearTimeout(this.autoTimer);
+    this.autoTimer = null;
+    this.autoStartAt = 0;
+    this.roster = resume ? resume.roster : buildRoster(this.players, this.mode, this.fill, this.diff);
+    this.match = createMatch({
+      roster: this.roster,
+      arena: resume ? resume.arena : this.arena,
+      goal: resume ? resume.goal : this.goal,
+      winRounds: resume ? resume.winRounds : 3,
+      startAt: resume ? resume.startAt : null,
+    });
     this.brains = new Map(this.roster.filter((r) => r.bot).map((r) => [r.id, createBrain(r.bot, this.match.rng)]));
     this.inputs.clear();
     this.dashSeen.clear();
@@ -269,11 +380,17 @@ export class RoomHost {
         }
       }
       stepMatch(m, STEP, inputs);
+      if (m.events.length) m.events.push(...botReactions(m, m.events, m.rng));
       if (m.events.length) {
         events.push(...m.events);
         this.outbox.push(...m.events);
         m.events.length = 0;
       }
+    }
+    // Öffentliche Räume gehen nach dem Ergebnis von selbst zurück in die Lobby
+    if (this.isPublic && m.phase === 'matchEnd' && m.phaseT > PUBLIC_RESULT_S) {
+      this.backToLobby();
+      return events;
     }
     this.snapAcc += dt;
     if (this.snapAcc >= SNAP_EVERY) {

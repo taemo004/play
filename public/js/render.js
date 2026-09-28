@@ -375,6 +375,24 @@ export class Renderer {
     return { group, inner, bodyMat, color, eyes, hat, ground, shadow, marker, label, icon: label.querySelector('.picon'), rot: Math.atan2(p.fx, p.fz), flash: 0, trail: 0, lastIcon: '', spin: 0 };
   }
 
+  // Emoji-Sprechblase über der Figur
+  showEmote(id, emoji) {
+    const o = this.playerObjs.get(id);
+    if (!o || !emoji) return;
+    let b = o.label.querySelector('.pemo');
+    if (!b) {
+      b = document.createElement('span');
+      b.className = 'pemo';
+      o.label.appendChild(b);
+    }
+    b.textContent = emoji;
+    b.classList.remove('show');
+    void b.offsetWidth;
+    b.classList.add('show');
+    clearTimeout(o.emoTimer);
+    o.emoTimer = setTimeout(() => b.classList.remove('show'), 2200);
+  }
+
   renameLabel(id, name) {
     const o = this.playerObjs.get(id);
     if (o && !(this.localIds.has(id) && this.localIds.size === 1)) o.label.querySelector('.pname').textContent = name;

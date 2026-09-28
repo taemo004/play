@@ -142,7 +142,7 @@ export function safeRadius(m) {
 // ---------- Spiel anlegen ----------
 
 // roster: [{ id, name, team (0|1), bot?: 'easy'|'normal'|'hard' }]
-export function createMatch({ roster, rings, winRounds = 3, arena = 'lava', goal = 'sumo', seed = (Math.random() * 2 ** 32) >>> 0 }) {
+export function createMatch({ roster, rings, winRounds = 3, arena = 'lava', goal = 'sumo', startAt = null, seed = (Math.random() * 2 ** 32) >>> 0 }) {
   const teamSize = Math.max(...[0, 1].map((t) => roster.filter((p) => p.team === t).length));
   rings = rings || (teamSize > 1 ? 5 : 4);
   const tiles = buildTiles(rings);
@@ -183,6 +183,11 @@ export function createMatch({ roster, rings, winRounds = 3, arena = 'lava', goal
     nextPowerAt: CFG.POWER_FIRST,
     events: [],
   };
+  // Fortsetzen nach Gastgeber-Wechsel: Spielstand übernehmen, die abgebrochene Runde startet neu
+  if (startAt) {
+    m.score = [startAt.score[0] | 0, startAt.score[1] | 0];
+    m.round = Math.max(0, (startAt.round | 0) - 1);
+  }
   startRound(m);
   return m;
 }

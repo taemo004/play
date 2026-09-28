@@ -47,6 +47,7 @@ html, body {
 
 /* ---------- Bildschirme ---------- */
 .screen {
+  z-index: 10;
   position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
   padding: calc(16px + var(--safe-t)) 16px calc(16px + var(--safe-b)); overflow-y: auto; touch-action: pan-y;
 }
@@ -133,7 +134,7 @@ input:focus { border-color: var(--gold); }
 #scr-menu .panel, #scr-ai .panel, #scr-local .panel, #scr-online .panel, #scr-help .panel { background: rgba(28, 12, 40, 0.78); }
 
 /* ---------- HUD ---------- */
-#hud { position: fixed; inset: 0; pointer-events: none; }
+#hud { position: fixed; inset: 0; pointer-events: none; z-index: 6; }
 .scorebar {
   position: absolute; top: calc(8px + var(--safe-t)); left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 10px; background: rgba(0, 0, 0, 0.45); border-radius: 99px; padding: 6px 14px;
@@ -324,3 +325,27 @@ body.replaying #hud .scorebar, body.replaying #touch, body.replaying #toasts { v
 .tour-list .tour-locked { opacity: 0.5; }
 .tour-list .tour-done { opacity: 0.75; }
 .tour-list .boss .t-icon { font-size: 32px; filter: drop-shadow(0 0 6px #ffd166); }
+
+/* ---------- Emojis ---------- */
+#emotes {
+  position: absolute; right: calc(8px + env(safe-area-inset-right, 0px)); top: 50%; transform: translateY(-60%);
+  display: flex; flex-direction: column; gap: 8px; pointer-events: auto;
+}
+#emotes button {
+  width: 44px; height: 44px; border-radius: 50%; font-size: 22px; line-height: 1; cursor: pointer; padding: 0;
+  background: rgba(0, 0, 0, 0.4); border: 1px solid var(--line); transition: transform 0.08s;
+}
+#emotes button:active { transform: scale(0.85); }
+.plabel { position: absolute; }
+.plabel .pemo {
+  position: absolute; left: 50%; bottom: 100%; transform: translate(-50%, 0) scale(0); font-size: 30px; line-height: 1;
+  margin-bottom: 4px; filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.5)); pointer-events: none; opacity: 0;
+}
+.plabel .pemo.show { animation: emo 2.2s ease-out forwards; }
+@keyframes emo {
+  0% { transform: translate(-50%, 10px) scale(0.2); opacity: 0; }
+  12% { transform: translate(-50%, -6px) scale(1.25); opacity: 1; }
+  22%, 80% { transform: translate(-50%, -8px) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -26px) scale(0.9); opacity: 0; }
+}
+.pill { display: inline-block; margin-top: 4px; font-size: 12px; font-weight: 800; color: #3a2200; background: var(--gold); border-radius: 99px; padding: 3px 10px; }

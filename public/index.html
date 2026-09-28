@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de" data-v="3">
+<html lang="de" data-v="4">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="style.css?v=3" />
+  <link rel="stylesheet" href="style.css?v=4" />
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -27,6 +27,7 @@
     <div id="banner"><div class="b b1"></div><div class="b b2"></div></div>
     <button id="btn-quit" class="icon-btn" title="Verlassen (Esc)">✕</button>
     <button id="btn-mute" class="icon-btn" title="Ton an/aus (M)">🔊</button>
+    <div id="emotes" class="hidden"></div>
   </div>
 
   <div id="toasts"></div>
@@ -112,7 +113,9 @@
         <span>Dein Name</span>
         <input id="in-name2" class="name-in" maxlength="14" placeholder="Spieler" autocomplete="off" />
       </label>
-      <button id="btn-create" class="btn big accent">Raum erstellen</button>
+      <button id="btn-quick" class="btn big gold">⚡ Schnelles Spiel</button>
+      <p class="hint small center">Findet automatisch einen offenen Raum mit anderen Spielern.</p>
+      <button id="btn-create" class="btn big accent">Raum mit Freunden erstellen</button>
       <div class="join-row">
         <input id="in-code" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" />
         <button id="btn-join" class="btn big">Beitreten</button>
@@ -129,6 +132,7 @@
         <div>
           <div class="lbl">Raumcode</div>
           <div id="lobby-code" class="code">----</div>
+          <div id="lobby-public" class="pill hidden">⚡ Öffentlicher Raum</div>
         </div>
         <button id="btn-share" class="btn">🔗 Einladen</button>
       </div>
@@ -206,6 +210,10 @@
         <li><b>Arenen:</b> 🌋 Vulkan ist der Klassiker. 🧊 Auf dem Gletscher rutschst du lange nach – früh bremsen!
           🎠 Das Karussell dreht sich immer schneller und zieht dich nach außen. 🎲 Wechselnd: jede Runde eine andere.</li>
         <li><b>Wiederholung:</b> Entscheidet ein Stoß die Runde, siehst du ihn noch einmal in Zeitlupe. Tippen überspringt sie.</li>
+        <li><b>⚡ Schnelles Spiel:</b> Unter „Online“ findest du automatisch einen offenen Raum. Sobald zwei Spieler da
+          sind, geht es nach kurzer Zeit von selbst los.</li>
+        <li><b>Emojis:</b> Mit den Knöpfen rechts (oder den Tasten 1–4) zeigst du 👍 😂 😡 😱 über deiner Figur.</li>
+        <li><b>Gastgeber weg?</b> Online übernimmt dann automatisch ein Mitspieler – der Spielstand bleibt erhalten.</li>
         <li><b>Deine Figur:</b> Hüte und Extras findest du im Menü. Manche schaltest du durch Siege und K.O.s frei.</li>
         <li><b>Tipp:</b> Stell dich zwischen Gegner und Mitte, dann fliegt er beim Rammen nach außen.</li>
       </ul>
@@ -239,20 +247,20 @@
   {
     "imports": {
       "three": "./vendor/three.min.js?v=0.186.1",
-      "./js/main.js": "./js/main.js?v=3",
-      "./js/sim.js": "./js/sim.js?v=3",
-      "./js/ai.js": "./js/ai.js?v=3",
-      "./js/room.js": "./js/room.js?v=3",
-      "./js/net.js": "./js/net.js?v=3",
-      "./js/render.js": "./js/render.js?v=3",
-      "./js/input.js": "./js/input.js?v=3",
-      "./js/audio.js": "./js/audio.js?v=3",
-      "./js/looks.js": "./js/looks.js?v=3",
-      "./js/tourney.js": "./js/tourney.js?v=3",
-      "./js/version.js": "./js/version.js?v=3"
+      "./js/main.js": "./js/main.js?v=4",
+      "./js/sim.js": "./js/sim.js?v=4",
+      "./js/ai.js": "./js/ai.js?v=4",
+      "./js/room.js": "./js/room.js?v=4",
+      "./js/net.js": "./js/net.js?v=4",
+      "./js/render.js": "./js/render.js?v=4",
+      "./js/input.js": "./js/input.js?v=4",
+      "./js/audio.js": "./js/audio.js?v=4",
+      "./js/looks.js": "./js/looks.js?v=4",
+      "./js/tourney.js": "./js/tourney.js?v=4",
+      "./js/version.js": "./js/version.js?v=4"
     }
   }
   </script>
-  <script type="module" src="js/main.js?v=3"></script>
+  <script type="module" src="js/main.js?v=4"></script>
 </body>
 </html>
