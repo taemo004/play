@@ -2,7 +2,7 @@
 // Lobby, Teams, Einstellungen und die eigentliche Partie. Der Gastgeber rechnet die Physik für alle,
 // die Mitspieler schicken nur ihre Eingaben und bekommen ~30× pro Sekunde den Zustand zurück.
 
-import { createMatch, stepMatch, encodeSnap, ARENA_MODES } from './sim.js';
+import { createMatch, stepMatch, encodeSnap, ARENA_MODES, GOALS } from './sim.js';
 import { sanitizeLook, randomLook } from './looks.js';
 import { createBrain, botThink, DIFFICULTIES } from './ai.js';
 
@@ -46,6 +46,7 @@ export class RoomHost {
     this.fill = true;
     this.diff = 'normal';
     this.arena = 'mix';
+    this.goal = 'sumo';
     this.match = null;
     this.roster = null;
     this.inputs = new Map();
@@ -119,6 +120,7 @@ export class RoomHost {
       fill: this.fill,
       diff: this.diff,
       arena: this.arena,
+      goal: this.goal,
       problem: this.problem(),
       players: this.players.map((p) => ({ id: p.id, name: p.name, team: p.team, look: p.look })),
     };
@@ -188,6 +190,7 @@ export class RoomHost {
         if (typeof msg.fill === 'boolean') this.fill = msg.fill;
         if (DIFFICULTIES[msg.diff]) this.diff = msg.diff;
         if (ARENA_MODES.includes(msg.arena)) this.arena = msg.arena;
+        if (GOALS[msg.goal]) this.goal = msg.goal;
         this.rebalance();
         return this.broadcastRoom();
       }
@@ -218,19 +221,19 @@ export class RoomHost {
         const seen = this.dashSeen.get(id) ?? d;
         const dash = d > seen || (prev ? prev.dash : false);
         this.dashSeen.set(id, Math.max(seen, d));
-        this.inputs.set(id, { x, z, dash });
+        this.inputs.set(id, { x, z, dash, hold: !!msg.h });
         return;
       }
     }
   }
 
   startMsg() {
-    return { t: 'start', roster: this.roster, rings: this.match.rings, winRounds: this.match.winRounds, arena: this.match.arenaMode };
+    return { t: 'start', roster: this.roster, rings: this.match.rings, winRounds: this.match.winRounds, arena: this.match.arenaMode, goal: this.match.goal };
   }
 
   startMatch() {
     this.roster = buildRoster(this.players, this.mode, this.fill, this.diff);
-    this.match = createMatch({ roster: this.roster, arena: this.arena });
+    this.match = createMatch({ roster: this.roster, arena: this.arena, goal: this.goal });
     this.brains = new Map(this.roster.filter((r) => r.bot).map((r) => [r.id, createBrain(r.bot, this.match.rng)]));
     this.inputs.clear();
     this.dashSeen.clear();

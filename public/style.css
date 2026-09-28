@@ -124,7 +124,7 @@ input:focus { border-color: var(--gold); }
 .stats td { padding: 7px 6px; text-align: right; border-top: 1px solid var(--line); font-weight: 700; }
 .stats tr.team0 td:first-child { color: #ffb3ba; }
 .stats tr.team1 td:first-child { color: #a9cbff; }
-#result-title { font-size: 36px; font-weight: 900; }
+#result-title { font-size: clamp(24px, 8vw, 36px); font-weight: 900; text-align: center; }
 #result-title.win { color: var(--gold); text-shadow: 0 4px 20px rgba(255, 209, 102, 0.5); }
 #result-title.lose { color: #c9b6d6; }
 
@@ -290,3 +290,37 @@ body.replaying::before, body.replaying::after {
 body.replaying::before { top: 0; }
 body.replaying::after { bottom: 0; }
 body.replaying #hud .scorebar, body.replaying #touch, body.replaying #toasts { visibility: hidden; }
+
+/* ---------- Aufladen ---------- */
+.dash-btn { --ch: 0; flex-direction: column; }
+.dash-btn small { position: relative; z-index: 1; font-size: 9px; font-weight: 700; letter-spacing: 0; opacity: 0.8; }
+.dash-charge {
+  position: absolute; inset: -12px; border-radius: 50%; pointer-events: none; opacity: 0;
+  background: conic-gradient(#ffe14d calc(var(--ch) * 360deg), transparent 0);
+  -webkit-mask: radial-gradient(circle, transparent 57px, #000 58px); mask: radial-gradient(circle, transparent 57px, #000 58px);
+}
+.dash-btn.charging .dash-charge { opacity: 1; }
+.dash-btn.charging { transform: scale(calc(0.92 + var(--ch) * 0.1)); }
+.dash-btn.full { box-shadow: 0 6px 0 #7d1020, 0 0 30px #ffe14d; animation: blink 0.15s infinite alternate; }
+.dash-btn.press:not(.charging) { transform: scale(0.9); }
+
+/* ---------- Hügel-Balken ---------- */
+#hill-bar { display: flex; gap: 4px; margin: 3px 0 1px; }
+#hill-bar i { --p: 0; flex: 1; height: 7px; border-radius: 99px; background: rgba(255, 255, 255, 0.15); overflow: hidden; position: relative; }
+#hill-bar i::after { content: ''; position: absolute; top: 0; bottom: 0; width: calc(var(--p) * 100%); border-radius: 99px; }
+#hill-bar .h0::after { right: 0; background: var(--red); box-shadow: 0 0 8px var(--red); }
+#hill-bar .h1::after { left: 0; background: var(--blue); box-shadow: 0 0 8px var(--blue); }
+
+/* ---------- Turnier ---------- */
+.btn.gold { background: linear-gradient(#ffd166, #e89b1c); color: #3a2200; box-shadow: 0 4px 0 #8a5300; border-color: rgba(255, 255, 255, 0.4); }
+.tour-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.tour-list li { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 13px; background: rgba(255, 255, 255, 0.06); border: 1.5px solid var(--line); }
+.tour-list .t-icon { font-size: 26px; }
+.tour-list .t-main { flex: 1; min-width: 0; }
+.tour-list .t-main small { color: var(--muted); }
+.tour-list .t-text { display: block; font-size: 13px; color: #f1e3f0; margin-top: 3px; }
+.tour-list .t-badge { font-size: 20px; }
+.tour-list .tour-current { border-color: var(--gold); background: rgba(255, 209, 102, 0.14); }
+.tour-list .tour-locked { opacity: 0.5; }
+.tour-list .tour-done { opacity: 0.75; }
+.tour-list .boss .t-icon { font-size: 32px; filter: drop-shadow(0 0 6px #ffd166); }

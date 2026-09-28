@@ -11,6 +11,9 @@ Läuft ohne Installation und ohne eigenen Server direkt im Browser (GitHub Pages
 
 ## Spielmodi
 
+- **🏆 Turnier** – fünf Gegner mit eigenem Stil nacheinander (Knödel, Frosti, Wirbelwind, Dampfwalze und der riesige
+  Boss Yokozuna). Jeder Kampf geht auf 2 Gewinnrunden, verlorene Kämpfe lassen sich wiederholen. Wer gewinnt,
+  bekommt den 🥇 Goldgürtel.
 - **🤖 Gegen KI** – 1 gegen 1 oder 2 gegen 2 (mit KI-Partner), drei Schwierigkeitsstufen
 - **👥 Zu zweit an einem Handy** – Handy flach zwischen euch auf den Tisch legen, jeder spielt von seiner Seite
   (die obere Bildschirmhälfte ist um 180° gedreht). 1 gegen 1 oder 2 gegen 2 mit KI-Partnern.
@@ -20,6 +23,11 @@ Läuft ohne Installation und ohne eigenen Server direkt im Browser (GitHub Pages
 
 ## Spielmechanik
 
+- **Spielziele:** 🥊 *Runterschubsen* (letztes Team auf der Arena gewinnt) oder ⛰️ *Hügel halten*: Wer das goldene
+  Mittelfeld 12 Sekunden lang allein hält, gewinnt die Runde. Runtergefallene kommen dabei nach 2,5 Sekunden vom
+  Himmel zurück, und die Arena bröckelt nicht. Beide Ziele gibt es gegen KI, zu zweit und online.
+- **Aufladbares Rammen:** Taste halten lädt auf (man läuft langsamer), loslassen rammt – voll geladen mit fast
+  doppelter Wucht. Kurz tippen rammt sofort.
 - **Laufen** mit dem Joystick, **Rammen** macht einen kurzen, schnellen Sprint. Trifft er, fliegt der Gegner weg
   und rutscht kurz hilflos. Danach lädt das Rammen gut eine Sekunde lang auf.
 - **Frontal-Zusammenstoß:** Rammen beide gleichzeitig ineinander, prallen beide ab.
@@ -40,9 +48,9 @@ Läuft ohne Installation und ohne eigenen Server direkt im Browser (GitHub Pages
 
 | Gerät | Laufen | Rammen |
 | --- | --- | --- |
-| Handy | linke Bildschirmhälfte wischen (Joystick erscheint unter dem Finger) | rechte Hälfte antippen |
-| Tastatur | `WASD` / Pfeiltasten | `Leertaste`, `Shift`, `Enter` |
-| Gamepad | linker Stick | A / B / X / Y |
+| Handy | linke Bildschirmhälfte wischen (Joystick erscheint unter dem Finger) | rechte Hälfte antippen, halten lädt auf |
+| Tastatur | `WASD` / Pfeiltasten | `Leertaste`, `Shift`, `Enter` (halten lädt auf) |
+| Gamepad | linker Stick | A / B / X / Y (halten lädt auf) |
 
 `M` schaltet den Ton an und aus, `Esc` verlässt das Spiel.
 
@@ -107,6 +115,7 @@ public/style.css       Styling (Handy zuerst, Hoch- und Querformat)
 public/js/main.js      Ablauf, Spielmodi, Spiel-Loop, Anzeige, Online-Lobby
 public/js/sim.js       Spiellogik ohne Grafik: Arenen, Physik, Runden, Power-ups, Netz-Kodierung
 public/js/looks.js     Hüte und Extras, Freischalt-Regeln
+public/js/tourney.js   Turnier-Gegner (Stärke, Arena, Spielziel, Größe, Aussehen)
 public/js/ai.js        KI-Gegner (Leicht / Mittel / Schwer)
 public/js/render.js    3D-Darstellung mit three.js: Arena-Themen, Figuren mit Hüten, Vorschau, Partikel, Kamera
 public/js/input.js     Touch-Joystick, Rammen-Taste, geteilter Bildschirm, Tastatur, Gamepad

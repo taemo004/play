@@ -1,6 +1,7 @@
 // Sumo Smash – Hauptlogik: Menüs, Spielmodi (KI, zu zweit, online), Spiel-Loop und Anzeige.
 import { APP_VERSION } from './version.js';
-import { createMatch, stepMatch, applySnap, applyTiles, CFG } from './sim.js';
+import { createMatch, stepMatch, applySnap, applyTiles, CFG, GOALS } from './sim.js';
+import { STAGES, stageRoster, TOUR_WIN_ROUNDS } from './tourney.js';
 import { createBrain, botThink } from './ai.js';
 import { Renderer, Preview, POWER_ICONS, POWER_NAMES } from './render.js';
 import { HATS, EXTRAS, EMPTY_STATS, isUnlocked, sanitizeLook, randomLook, newlyUnlocked } from './looks.js';
@@ -57,6 +58,7 @@ const store = {
 };
 
 const ARENA_LABEL = {
+  mix: '🎲 Wechselnd',
   lava: '🌋 Vulkan',
   eis: '🧊 Gletscher – rutschig!',
   dreh: '🎠 Karussell – dreht immer schneller',
@@ -65,6 +67,8 @@ const REPLAY_SPEED = 0.42;
 
 const settings = {
   aiArena: store.get('aiArena', 'lava'),
+  aiGoal: store.get('aiGoal', 'sumo'),
+  localGoal: store.get('localGoal', 'sumo'),
   localArena: store.get('localArena', 'lava'),
   aiMode: store.get('aiMode', '1v1'),
   aiDiff: store.get('aiDiff', 'normal'),
@@ -126,11 +130,14 @@ class LocalSession {
     this.topDown = !!opts.topDown;
     this.arena = opts.arena || 'lava';
     this.diff = opts.diff || null;
+    this.goal = opts.goal || 'sumo';
+    this.winRounds = opts.winRounds || 3;
+    this.tourStage = opts.tourStage ?? null;
     this.start();
   }
 
   start() {
-    this.match = createMatch({ roster: this.roster, arena: this.arena });
+    this.match = createMatch({ roster: this.roster, arena: this.arena, goal: this.goal, winRounds: this.winRounds });
     this.brains = new Map(this.roster.filter((r) => r.bot).map((r) => [r.id, createBrain(r.bot, this.match.rng)]));
     this.acc = 0;
     this.lastDash = new Map();
@@ -147,7 +154,7 @@ class LocalSession {
       const r = controls.read(h.slot);
       const w = toWorld(r, this.azimuth);
       const last = this.lastDash.has(h.pid) ? this.lastDash.get(h.pid) : r.dash;
-      inputs.set(h.pid, { x: w.x, z: w.z, dash: r.dash > last });
+      inputs.set(h.pid, { x: w.x, z: w.z, dash: r.dash > last, hold: r.hold });
       this.lastDash.set(h.pid, r.dash);
     }
     const events = [];
@@ -186,7 +193,7 @@ class HostSession {
     if (!net.host) return [];
     const r = controls.read(0);
     const w = toWorld(r, this.azimuth);
-    net.host.handle(net.id, { t: 'in', x: w.x, z: w.z, d: r.dash });
+    net.host.handle(net.id, { t: 'in', x: w.x, z: w.z, d: r.dash, h: r.hold ? 1 : 0 });
     return net.host.update(dt);
   }
 }
@@ -195,7 +202,7 @@ class HostSession {
 class ClientSession {
   constructor(msg) {
     this.kind = 'client';
-    this.match = createMatch({ roster: msg.roster, rings: msg.rings, winRounds: msg.winRounds, arena: msg.arena, seed: 1 });
+    this.match = createMatch({ roster: msg.roster, rings: msg.rings, winRounds: msg.winRounds, arena: msg.arena, goal: msg.goal, seed: 1 });
     this.match.events.length = 0;
     const me = msg.roster.find((r) => r.id === net.id);
     this.isPlayer = !!me;
@@ -246,11 +253,12 @@ class ClientSession {
     if (this.isPlayer) {
       const r = controls.read(0);
       this.sendAcc += dt;
-      if (this.sendAcc >= 1 / 30 || r.dash !== this.lastSentDash) {
+      if (this.sendAcc >= 1 / 30 || r.dash !== this.lastSentDash || r.hold !== this.lastSentHold) {
+        this.lastSentHold = r.hold;
         this.sendAcc = 0;
         this.lastSentDash = r.dash;
         const w = toWorld(r, this.azimuth);
-        net.send({ t: 'in', x: Math.round(w.x * 100) / 100, z: Math.round(w.z * 100) / 100, d: r.dash });
+        net.send({ t: 'in', x: Math.round(w.x * 100) / 100, z: Math.round(w.z * 100) / 100, d: r.dash, h: r.hold ? 1 : 0 });
       }
     }
     if (!this.snaps.length) return [];
@@ -287,6 +295,7 @@ function demoSession() {
 
 function show(id) {
   for (const el of $$('.screen')) el.classList.toggle('hidden', el.id !== id);
+  if (id === 'scr-tour') renderTour();
   if (id === 'scr-look') openLookScreen();
   else if (preview) preview.stop();
 }
@@ -330,9 +339,52 @@ function startAi() {
   const roster = [{ id: 1, name: playerName(), team: 0, look: myLook() }];
   if (size === 2) roster.push({ id: 2, name: 'Partner-KI', team: 0, bot: settings.aiDiff, look: randomLook() });
   for (let k = 0; k < size; k++) roster.push({ id: 10 + k, name: names[k], team: 1, bot: settings.aiDiff, look: randomLook() });
-  const s = new LocalSession('ai', roster, [{ pid: 1, slot: 0 }], { arena: settings.aiArena, diff: settings.aiDiff });
+  const s = new LocalSession('ai', roster, [{ pid: 1, slot: 0 }], { arena: settings.aiArena, diff: settings.aiDiff, goal: settings.aiGoal });
   setSession(s, { playing: true });
 }
+
+// ---------- Turnier ----------
+
+function tourState() {
+  return loadJSON('tour', { stage: 0 });
+}
+
+function startTour(stage) {
+  sfx.unlock();
+  const st = STAGES[stage];
+  const roster = stageRoster(stage, { name: playerName(), look: myLook() });
+  const s = new LocalSession('tour', roster, [{ pid: 1, slot: 0 }], {
+    arena: st.arena,
+    goal: st.goal,
+    diff: st.diff,
+    winRounds: TOUR_WIN_ROUNDS,
+    tourStage: stage,
+  });
+  setSession(s, { playing: true });
+  toast(`🏆 Turnier ${stage + 1}/${STAGES.length}: ${esc(st.name)} – ${esc(st.title)}`);
+}
+
+function renderTour() {
+  const { stage } = tourState();
+  const stats = loadStats();
+  $('#tour-list').innerHTML = STAGES.map((st, i) => {
+    const hat = HATS.find((h) => h.id === st.look.hat);
+    const state = i < stage ? 'done' : i === stage ? 'current' : 'locked';
+    const badge = state === 'done' ? '✅' : state === 'current' ? '⚔️' : '🔒';
+    const goal = st.goal === 'huegel' ? ' · ⛰️ Hügel halten' : '';
+    return `<li class="tour-${state}${st.boss ? ' boss' : ''}">
+      <span class="t-icon">${hat ? hat.icon : '🥋'}</span>
+      <span class="t-main"><b>${esc(st.name)}</b> <small>${esc(st.title)}</small>
+        ${state === 'current' ? `<span class="t-text">${esc(st.text)}<br><small>${ARENA_LABEL[st.arena === 'mix' ? 'mix' : st.arena] || '🎲 Wechselnd'}${goal}</small></span>` : ''}</span>
+      <span class="t-badge">${badge}</span></li>`;
+  }).join('');
+  $('#tour-info').textContent = stats.tourney
+    ? `Turniersiege: ${stats.tourney} 🏆`
+    : 'Besiege alle fünf Gegner. Verlierst du, kannst du den Kampf beliebig oft wiederholen.';
+  $('#btn-tour-start').textContent = stage === 0 ? 'Turnier starten' : `Gegen ${STAGES[stage].name} antreten`;
+}
+
+$('#btn-tour-start').addEventListener('click', () => startTour(tourState().stage));
 
 function startLocal() {
   sfx.unlock();
@@ -347,7 +399,7 @@ function startLocal() {
   const s = new LocalSession('local', roster, [
     { pid: 1, slot: 0 },
     { pid: 2, slot: 1 },
-  ], { topDown: true, arena: settings.localArena });
+  ], { topDown: true, arena: settings.localArena, goal: settings.localGoal });
   setSession(s, { playing: true });
 }
 
@@ -512,10 +564,14 @@ function handleEvents(events) {
     if (demo) continue;
     switch (e.type) {
       case 'dash':
-        sfx.play('dash', mine(e.id) ? 1 : 0.45);
+        sfx.play('dash', (mine(e.id) ? 1 : 0.45) * (1 + (e.charge || 0)));
         if (mine(e.id)) vibrate(12);
         break;
+      case 'land':
+        sfx.play('bump');
+        break;
       case 'hit':
+        if (e.charged && (mine(e.a) || mine(e.b))) toast(mine(e.a) ? '💥 Volltreffer!' : '😵 Voll erwischt!');
         sfx.play('hit', Math.min(1, e.power / CFG.DASH_KNOCK));
         if (mine(e.b)) vibrate(60);
         else if (mine(e.a)) vibrate(25);
@@ -555,7 +611,10 @@ function handleEvents(events) {
         break;
       case 'round':
         stopReplay();
-        setBanner(`Runde ${e.round}<small>${ARENA_LABEL[e.arena] || ''}</small>`, 'gold');
+        setBanner(
+          `Runde ${e.round}<small>${ARENA_LABEL[e.arena] || ''}${session.view.goal === 'huegel' ? '<br>⛰️ Hügel halten!' : ''}</small>`,
+          'gold',
+        );
         break;
       case 'go':
         sfx.play('go');
@@ -635,7 +694,14 @@ function updateHud(v) {
     $('#round-lbl').textContent = `Runde ${v.round}`;
   }
   const sl = $('#shrink-lbl');
-  if (v.phase === 'play') {
+  const hillBar = $('#hill-bar');
+  hillBar.classList.toggle('hidden', v.goal !== 'huegel');
+  if (v.goal === 'huegel') {
+    for (const t of [0, 1]) hillBar.children[t].style.setProperty('--p', Math.min(1, v.hill[t] / CFG.HILL_TARGET).toFixed(3));
+    const hs = v.hillState;
+    sl.textContent = v.phase !== 'play' ? '' : hs === 2 ? '⚔️ umkämpft!' : hs === 0 ? '⛰️ Rot hält' : hs === 1 ? '⛰️ Blau hält' : '⛰️ Hügel frei';
+    sl.classList.toggle('warn', v.phase === 'play' && hs === 2);
+  } else if (v.phase === 'play') {
     const left = v.nextShrinkAt - v.phaseT;
     const more = v.outerRing > CFG.MIN_RING || v.tiles.some((t) => t.state === 0 && t.ring > 0);
     if (!more) sl.textContent = '';
@@ -658,7 +724,8 @@ function updateHud(v) {
     const p = v.players.find((pl) => pl.id === id);
     if (!p) return;
     const full = p.turboT > 0 ? CFG.TURBO_COOL : CFG.DASH_COOL;
-    controls.setCooldown(slot, p.doomed || p.out ? 1 : p.cool / full, p.heavyT > 0);
+    const charge = p.charging ? Math.min(1, p.charge / CFG.CHARGE_MAX) : 0;
+    controls.setCooldown(slot, p.doomed || p.out ? 1 : p.cool / full, p.heavyT > 0, charge);
   });
 }
 
@@ -667,7 +734,16 @@ function showResult() {
   const w = v.matchWinner;
   const myTeam = myTeamId();
   const title = $('#result-title');
-  if (myTeam !== null) {
+  const tour = session.kind === 'tour';
+  const lastStage = tour && session.tourStage === STAGES.length - 1;
+  if (tour) {
+    const won = w === myTeam;
+    title.textContent = won ? (lastStage ? '🏆 TURNIERSIEGER!' : '✅ Gegner besiegt!') : 'Knapp verloren…';
+    title.className = won ? 'win' : 'lose';
+    sfx.play(won ? 'win' : 'lose');
+    const next = won ? (lastStage ? 0 : session.tourStage + 1) : session.tourStage;
+    store.set('tour', JSON.stringify({ stage: next }));
+  } else if (myTeam !== null) {
     title.textContent = w === myTeam ? '🏆 SIEG!' : 'NIEDERLAGE';
     title.className = w === myTeam ? 'win' : 'lose';
     sfx.play(w === myTeam ? 'win' : 'lose');
@@ -689,8 +765,9 @@ function showResult() {
       games: before.games + 1,
       wins: before.wins + (won ? 1 : 0),
       kos: before.kos + me.stats.ko,
-      hardWins: before.hardWins + (won && session.kind === 'ai' && session.diff === 'hard' ? 1 : 0),
+      hardWins: before.hardWins + (won && (session.kind === 'ai' || tour) && session.diff === 'hard' ? 1 : 0),
       flawless: before.flawless + (won && me.stats.falls === 0 ? 1 : 0),
+      tourney: before.tourney + (won && lastStage ? 1 : 0),
     };
     store.set('stats', JSON.stringify(after));
     const fresh = newlyUnlocked(before, after);
@@ -711,6 +788,11 @@ function showResult() {
     again.disabled = true;
     again.textContent = 'Warte auf Gastgeber…';
     back.textContent = 'Raum verlassen';
+  } else if (tour) {
+    const won = w === myTeam;
+    again.disabled = false;
+    again.textContent = !won ? 'Nochmal versuchen' : lastStage ? 'Neues Turnier' : `Weiter: ${STAGES[session.tourStage + 1].name} ▶`;
+    back.textContent = 'Turnier-Übersicht';
   } else {
     again.disabled = false;
     again.textContent = 'Revanche';
@@ -732,6 +814,7 @@ function countFalls(events) {
 $('#btn-again').addEventListener('click', () => {
   sfx.play('click');
   if (session.kind === 'host') net.send({ t: 'rematch' });
+  else if (session.kind === 'tour') startTour(tourState().stage);
   else if (session.kind === 'ai' || session.kind === 'local') {
     session.start();
     setSession(session, { playing: true });
@@ -740,7 +823,9 @@ $('#btn-again').addEventListener('click', () => {
 $('#btn-result-menu').addEventListener('click', () => {
   sfx.play('click');
   if (session.kind === 'host') net.send({ t: 'lobby' });
-  else toMenu();
+  else if (session.kind === 'tour') {
+    toMenu('scr-tour');
+  } else toMenu();
 });
 
 function quit() {

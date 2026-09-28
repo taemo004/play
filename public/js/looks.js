@@ -16,9 +16,10 @@ export const EXTRAS = [
   { id: 'sonnenbrille', name: 'Sonnenbrille', icon: '🕶️' },
   { id: 'schnurrbart', name: 'Schnurrbart', icon: '🥸', need: { wins: 2 }, hint: 'Gewinne 2 Partien' },
   { id: 'herzbrille', name: 'Herzbrille', icon: '😍', need: { kos: 30 }, hint: 'Schubs 30 Gegner raus' },
+  { id: 'goldguertel', name: 'Goldgürtel', icon: '🥇', need: { tourney: 1 }, hint: 'Gewinne das Turnier' },
 ];
 
-export const EMPTY_STATS = { games: 0, wins: 0, kos: 0, hardWins: 0, flawless: 0 };
+export const EMPTY_STATS = { games: 0, wins: 0, kos: 0, hardWins: 0, flawless: 0, tourney: 0 };
 
 export function isUnlocked(item, stats) {
   if (!item.need) return true;
@@ -32,7 +33,7 @@ export function sanitizeLook(look) {
 }
 
 // Die schwersten Belohnungen trägt die KI nicht – die bleiben etwas Besonderes
-const RARE = new Set(['krone', 'heiligenschein', 'herzbrille']);
+const RARE = new Set(['krone', 'heiligenschein', 'herzbrille', 'goldguertel']);
 
 // KI-Gegner bekommen zufällig etwas Lustiges auf
 export function randomLook(rng = Math.random) {
