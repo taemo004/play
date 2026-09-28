@@ -24,6 +24,9 @@ export const CFG = {
   OUT_Y: -9,
   COUNTDOWN: 3,
   ROUND_END: 3,
+  REPLAY_EXTRA: 2, // Runde endet durch K.O.: etwas länger Pause für die Zeitlupen-Wiederholung
+  SPIN_RAMP: 8, // so lange dauert es, bis das Karussell volle Fahrt hat
+  CENTRIFUGAL: 2.5,
   ROUND_LIMIT: 100, // Sicherheitsnetz: danach Unentschieden
   SHRINK_START: 12,
   SHRINK_EVERY: 8,
@@ -42,6 +45,15 @@ export const CFG = {
 };
 
 export const PHASES = ['countdown', 'play', 'roundEnd', 'matchEnd'];
+
+// Arenen: gleiche Steuerung, anderes Fahrgefühl
+export const ARENAS = {
+  lava: { name: 'Vulkan', control: 8, stunDamp: 2.2, stunControl: 0.7, knock: 1, spin: 0 },
+  eis: { name: 'Gletscher', control: 2.3, stunDamp: 1.6, stunControl: 0.35, knock: 0.75, spin: 0 },
+  dreh: { name: 'Karussell', control: 8, stunDamp: 2.2, stunControl: 0.7, knock: 1, spin: 0.42 },
+};
+export const ARENA_IDS = Object.keys(ARENAS);
+export const ARENA_MODES = [...ARENA_IDS, 'mix']; // mix: jede Runde eine andere Arena
 export const POWER_TYPES = ['heavy', 'turbo', 'shock'];
 export const TEAM_NAMES = ['Rot', 'Blau'];
 
@@ -94,6 +106,15 @@ export function buildTiles(rings) {
 }
 
 export function tileAt(m, x, z) {
+  if (m.angle) {
+    // Weltpunkt in das (gedrehte) Arena-Koordinatensystem zurückdrehen
+    const c = Math.cos(m.angle);
+    const s = Math.sin(m.angle);
+    const ax = x * c + z * s;
+    const az = -x * s + z * c;
+    x = ax;
+    z = az;
+  }
   const { q, r } = pointToHex(x, z);
   return m.tileIndex.get(tileKey(q, r)) || null;
 }
@@ -111,15 +132,26 @@ export function safeRadius(m) {
 // ---------- Spiel anlegen ----------
 
 // roster: [{ id, name, team (0|1), bot?: 'easy'|'normal'|'hard' }]
-export function createMatch({ roster, rings, winRounds = 3, seed = (Math.random() * 2 ** 32) >>> 0 }) {
+export function createMatch({ roster, rings, winRounds = 3, arena = 'lava', seed = (Math.random() * 2 ** 32) >>> 0 }) {
   const teamSize = Math.max(...[0, 1].map((t) => roster.filter((p) => p.team === t).length));
   rings = rings || (teamSize > 1 ? 5 : 4);
   const tiles = buildTiles(rings);
+  const rng = mulberry32(seed);
+  const mode = ARENA_MODES.includes(arena) ? arena : 'lava';
+  const order = [...ARENA_IDS].sort(() => rng() - 0.5);
   const m = {
     rings,
     winRounds,
     seed,
-    rng: mulberry32(seed),
+    rng,
+    arenaMode: mode,
+    arenaOrder: order,
+    arena: mode === 'mix' ? order[0] : mode,
+    angle: 0,
+    spin: 0,
+    spinDir: 1,
+    roundEndLen: CFG.ROUND_END,
+    replay: null,
     time: 0,
     phase: 'countdown',
     phaseT: 0,
@@ -148,6 +180,7 @@ function makePlayer(r, slot) {
     name: r.name || 'Spieler',
     team: r.team === 1 ? 1 : 0,
     bot: r.bot || null,
+    look: r.look || { hat: 'none', extra: 'none' },
     slot,
     x: 0,
     y: 0,
@@ -184,6 +217,12 @@ export function startRound(m) {
   m.phase = 'countdown';
   m.phaseT = 0;
   m.roundWinner = -1;
+  if (m.arenaMode === 'mix') m.arena = m.arenaOrder[(m.round - 1) % m.arenaOrder.length];
+  m.angle = 0;
+  m.spin = 0;
+  m.spinDir = m.round % 2 ? 1 : -1;
+  m.roundEndLen = CFG.ROUND_END;
+  m.replay = null;
   for (const t of m.tiles) {
     t.state = 0;
     t.t = 0;
@@ -225,7 +264,7 @@ export function startRound(m) {
       });
     });
   }
-  emit(m, 'round', { round: m.round });
+  emit(m, 'round', { round: m.round, arena: m.arena });
 }
 
 // ---------- Simulation ----------
@@ -244,6 +283,7 @@ export function stepMatch(m, dt, inputs) {
     updateShrink(m, dt);
     updatePowerups(m, dt);
   }
+  updateSpin(m, dt);
   updateTiles(m, dt);
   updatePlayers(m, dt, inputs, frozen);
   collide(m);
@@ -251,13 +291,40 @@ export function stepMatch(m, dt, inputs) {
   if (m.phase === 'play') {
     pickupPowerups(m);
     checkRoundEnd(m);
-  } else if (m.phase === 'roundEnd' && m.phaseT >= CFG.ROUND_END) {
+  } else if (m.phase === 'roundEnd' && m.phaseT >= m.roundEndLen) {
     if (m.matchWinner >= 0) {
       m.phase = 'matchEnd';
       m.phaseT = 0;
       emit(m, 'matchEnd', { winner: m.matchWinner });
     } else startRound(m);
   }
+}
+
+// Karussell: Arena dreht sich immer schneller und nimmt alle mit, die darauf stehen
+function updateSpin(m, dt) {
+  const arena = ARENAS[m.arena];
+  if (!arena.spin || m.phase === 'countdown') return;
+  const target = m.phase === 'play' ? arena.spin * Math.min(1, m.phaseT / CFG.SPIN_RAMP) * m.spinDir : m.spin;
+  m.spin = target;
+  const da = m.spin * dt;
+  if (!da) return;
+  m.angle += da;
+  const c = Math.cos(da);
+  const s = Math.sin(da);
+  const turn = (o) => {
+    const x = o.x * c - o.z * s;
+    o.z = o.x * s + o.z * c;
+    o.x = x;
+  };
+  for (const p of m.players) {
+    if (p.out || p.falling) continue;
+    turn(p);
+    // Fliehkraft zieht nach außen
+    const f = CFG.CENTRIFUGAL * m.spin * m.spin * dt;
+    p.vx += p.x * f;
+    p.vz += p.z * f;
+  }
+  for (const pu of m.powerups) turn(pu);
 }
 
 function updateShrink(m, dt) {
@@ -435,15 +502,16 @@ function updatePlayers(m, dt, inputs, frozen) {
       const speed = CFG.SPEED * (p.heavyT > 0 ? 0.85 : 1);
       const tx = ix * speed;
       const tz = iz * speed;
+      const arena = ARENAS[m.arena];
       if (p.stunT > 0) {
-        const damp = Math.exp(-CFG.STUN_DAMP * dt);
+        const damp = Math.exp(-arena.stunDamp * dt);
         p.vx *= damp;
         p.vz *= damp;
-        const k = 1 - Math.exp(-CFG.STUN_CONTROL * dt);
+        const k = 1 - Math.exp(-arena.stunControl * dt);
         p.vx += (tx - p.vx) * k;
         p.vz += (tz - p.vz) * k;
       } else {
-        const k = 1 - Math.exp(-CFG.CONTROL * dt);
+        const k = 1 - Math.exp(-arena.control * dt);
         p.vx += (tx - p.vx) * k;
         p.vz += (tz - p.vz) * k;
       }
@@ -503,7 +571,7 @@ function collide(m) {
         const vic = aDash ? b : a;
         const sx = aDash ? nx : -nx;
         const sz = aDash ? nz : -nz;
-        const power = CFG.DASH_KNOCK * clamp(atk.mass / vic.mass, 0.4, 2.5);
+        const power = CFG.DASH_KNOCK * ARENAS[m.arena].knock * clamp(atk.mass / vic.mass, 0.4, 2.5);
         // Eigenbewegung des Opfers quer zum Stoß bleibt, die Komponente in Stoßrichtung wird ersetzt
         const along = vic.vx * sx + vic.vz * sz;
         const push = power + Math.max(0, along) * 0.3;
@@ -578,13 +646,17 @@ function checkRoundEnd(m) {
   if (standing[0] && standing[1] && m.phaseT < CFG.ROUND_LIMIT) return;
   const winner = standing[0] && !standing[1] ? 0 : standing[1] && !standing[0] ? 1 : 2;
   m.roundWinner = winner;
+  // Entscheidender Sturz durch einen Stoß? Dann gibt es eine Zeitlupen-Wiederholung
+  const decisive = m.events.filter((e) => e.type === 'fall' && e.t === m.time && e.by != null).pop();
+  m.replay = winner < 2 && decisive ? { victim: decisive.id, by: decisive.by, t: m.time } : null;
+  m.roundEndLen = CFG.ROUND_END + (m.replay ? CFG.REPLAY_EXTRA : 0);
   if (winner < 2) {
     m.score[winner]++;
     if (m.score[winner] >= m.winRounds) m.matchWinner = winner;
   }
   m.phase = 'roundEnd';
   m.phaseT = 0;
-  emit(m, 'roundEnd', { winner, score: [...m.score] });
+  emit(m, 'roundEnd', { winner, score: [...m.score], replay: m.replay });
 }
 
 function clamp(v, a, b) {
@@ -620,6 +692,8 @@ export function encodeSnap(m, withTiles) {
     mw: m.matchWinner,
     or: m.outerRing,
     ns: r2(m.nextShrinkAt),
+    ar: ARENA_IDS.indexOf(m.arena),
+    an: Math.round(m.angle * 1000) / 1000,
     p: m.players.map((p) => [
       r2(p.x),
       r2(p.z),
@@ -662,6 +736,8 @@ export function applySnap(m, a, b, alpha, only = null) {
   m.matchWinner = s.mw;
   m.outerRing = s.or;
   m.nextShrinkAt = s.ns;
+  if (ARENA_IDS[s.ar]) m.arena = ARENA_IDS[s.ar];
+  m.angle = a.ar === b.ar && Number.isFinite(a.an) && Number.isFinite(b.an) ? lerp(a.an, b.an) : s.an || 0;
   m.powerups = s.pu.map(([id, type, x, z]) => ({ id, type: POWER_TYPES[type], x, z, life: 1 }));
 }
 

@@ -156,3 +156,28 @@ test('Späte Zuschauer bekommen die laufende Partie', () => {
   assert.ok(!last(c, 'start').roster.some((r) => r.id === c));
   room.destroy();
 });
+
+test('Arena und Aussehen kommen bei allen an', () => {
+  const room = new RoomHost('LOOK');
+  const box = [];
+  const h = room.addClient(() => {}, true);
+  room.handle(h, { t: 'hello', name: 'Host', look: { hat: 'cowboy', extra: 'quatsch' } });
+  const a = room.addClient((m) => box.push(m));
+  room.handle(a, { t: 'hello', name: 'Anna', look: { hat: 'party', extra: 'sonnenbrille' } });
+  room.handle(a, { t: 'settings', arena: 'eis' });
+  assert.equal(room.arena, 'mix', 'nur der Gastgeber wählt die Arena');
+  room.handle(h, { t: 'settings', arena: 'eis' });
+  room.handle(h, { t: 'settings', arena: 'weltall' });
+  assert.equal(room.arena, 'eis');
+  const info = [...box].reverse().find((m) => m.t === 'room');
+  assert.equal(info.arena, 'eis');
+  assert.deepEqual(info.players.find((p) => p.id === h).look, { hat: 'cowboy', extra: 'none' });
+  room.handle(h, { t: 'settings', mode: '2v2' });
+  room.handle(h, { t: 'start' });
+  const start = [...box].reverse().find((m) => m.t === 'start');
+  assert.equal(start.arena, 'eis');
+  assert.equal(room.match.arena, 'eis');
+  assert.deepEqual(start.roster.find((r) => r.id === a).look, { hat: 'party', extra: 'sonnenbrille' });
+  assert.ok(start.roster.filter((r) => r.bot).every((r) => r.look && r.look.hat !== 'none'), 'KI trägt etwas');
+  room.destroy();
+});

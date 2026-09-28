@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de" data-v="1">
+<html lang="de" data-v="2">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="style.css?v=1" />
+  <link rel="stylesheet" href="style.css?v=2" />
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -30,6 +30,7 @@
   </div>
 
   <div id="toasts"></div>
+  <div id="replay-badge"><span class="rec">●</span> WIEDERHOLUNG <small>Tippen zum Überspringen</small></div>
 
   <!-- Touch-Steuerung (wird von input.js gefüllt) -->
   <div id="touch" class="hidden"></div>
@@ -47,7 +48,10 @@
         <button class="btn big" data-go="scr-ai">🤖 Gegen KI</button>
         <button class="btn big" data-go="scr-local">👥 Zu zweit an einem Handy</button>
         <button class="btn big accent" data-go="scr-online">🌐 Online mit Freunden</button>
-        <button class="btn" data-go="scr-help">❓ So geht's</button>
+        <div class="row2">
+          <button class="btn" data-go="scr-look">🎩 Deine Figur</button>
+          <button class="btn" data-go="scr-help">❓ So geht's</button>
+        </div>
       </div>
     </div>
   </section>
@@ -62,6 +66,9 @@
       <p class="hint small" data-show="aiMode=2v2">Du spielst mit einem KI-Partner im Team Rot.</p>
       <div class="field"><span>Schwierigkeit</span>
         <div class="seg" data-set="aiDiff"><button data-v="easy">Leicht</button><button data-v="normal">Mittel</button><button data-v="hard">Schwer</button></div>
+      </div>
+      <div class="field"><span>Arena</span>
+        <div class="seg arena-seg" data-set="aiArena"><button data-v="lava">🌋 Vulkan</button><button data-v="eis">🧊 Gletscher</button><button data-v="dreh">🎠 Karussell</button><button data-v="mix">🎲 Wechselnd</button></div>
       </div>
       <button id="btn-ai-start" class="btn big accent">Los geht's!</button>
       <button class="btn ghost" data-go="scr-menu">← Zurück</button>
@@ -79,6 +86,9 @@
       </div>
       <div class="field" data-show="localMode=2v2"><span>Stärke der KI-Partner</span>
         <div class="seg" data-set="localDiff"><button data-v="easy">Leicht</button><button data-v="normal">Mittel</button><button data-v="hard">Schwer</button></div>
+      </div>
+      <div class="field"><span>Arena</span>
+        <div class="seg arena-seg" data-set="localArena"><button data-v="lava">🌋 Vulkan</button><button data-v="eis">🧊 Gletscher</button><button data-v="dreh">🎠 Karussell</button><button data-v="mix">🎲 Wechselnd</button></div>
       </div>
       <button id="btn-local-start" class="btn big accent">Los geht's!</button>
       <button class="btn ghost" data-go="scr-menu">← Zurück</button>
@@ -129,10 +139,27 @@
         <div class="field"><span>Stärke der KI</span>
           <div class="seg" data-room="diff"><button data-v="easy">Leicht</button><button data-v="normal">Mittel</button><button data-v="hard">Schwer</button></div>
         </div>
+        <div class="field"><span>Arena</span>
+        <div class="seg arena-seg" data-room="arena"><button data-v="lava">🌋 Vulkan</button><button data-v="eis">🧊 Gletscher</button><button data-v="dreh">🎠 Karussell</button><button data-v="mix">🎲 Wechselnd</button></div>
+        </div>
+
       </div>
       <p id="lobby-info" class="hint small"></p>
       <button id="btn-start" class="btn big accent">Spiel starten</button>
       <button id="btn-leave" class="btn ghost">Raum verlassen</button>
+    </div>
+  </section>
+
+  <!-- Deine Figur -->
+  <section id="scr-look" class="screen hidden">
+    <div class="panel wide">
+      <h2>🎩 Deine Figur</h2>
+      <canvas id="look-canvas"></canvas>
+      <p id="look-stats" class="hint small center"></p>
+      <div class="field"><span>Hut</span><div id="hat-grid" class="look-grid"></div></div>
+      <div class="field"><span>Extra</span><div id="extra-grid" class="look-grid"></div></div>
+      <p id="look-hint" class="status"></p>
+      <button class="btn big" data-go="scr-menu">Fertig</button>
     </div>
   </section>
 
@@ -150,6 +177,10 @@
         <li><b>Die Arena bröckelt:</b> Nach 12 Sekunden fällt Ring für Ring weg. Glühende Felder brechen gleich ab.</li>
         <li><b>Power-ups:</b> 🪨 Koloss – schwer und groß, kaum wegzuschubsen · ⚡ Turbo – Rammen lädt blitzschnell ·
           💥 Schockwelle – stößt alle Gegner in der Nähe weg.</li>
+        <li><b>Arenen:</b> 🌋 Vulkan ist der Klassiker. 🧊 Auf dem Gletscher rutschst du lange nach – früh bremsen!
+          🎠 Das Karussell dreht sich immer schneller und zieht dich nach außen. 🎲 Wechselnd: jede Runde eine andere.</li>
+        <li><b>Wiederholung:</b> Entscheidet ein Stoß die Runde, siehst du ihn noch einmal in Zeitlupe. Tippen überspringt sie.</li>
+        <li><b>Deine Figur:</b> Hüte und Extras findest du im Menü. Manche schaltest du durch Siege und K.O.s frei.</li>
         <li><b>Tipp:</b> Stell dich zwischen Gegner und Mitte, dann fliegt er beim Rammen nach außen.</li>
       </ul>
       <button class="btn big" data-go="scr-menu">Alles klar!</button>
@@ -161,6 +192,7 @@
     <div class="panel">
       <h2 id="result-title">SIEG!</h2>
       <p id="result-sub" class="tagline"></p>
+      <div id="result-unlocks"></div>
       <table class="stats"><thead><tr><th>Spieler</th><th title="Gegner runtergeschubst">K.O.</th><th title="Selbst runtergefallen">Stürze</th></tr></thead><tbody id="result-stats"></tbody></table>
       <button id="btn-again" class="btn big accent">Revanche</button>
       <button id="btn-result-menu" class="btn ghost">Menü</button>
@@ -181,18 +213,19 @@
   {
     "imports": {
       "three": "./vendor/three.min.js?v=0.186.1",
-      "./js/main.js": "./js/main.js?v=1",
-      "./js/sim.js": "./js/sim.js?v=1",
-      "./js/ai.js": "./js/ai.js?v=1",
-      "./js/room.js": "./js/room.js?v=1",
-      "./js/net.js": "./js/net.js?v=1",
-      "./js/render.js": "./js/render.js?v=1",
-      "./js/input.js": "./js/input.js?v=1",
-      "./js/audio.js": "./js/audio.js?v=1",
-      "./js/version.js": "./js/version.js?v=1"
+      "./js/main.js": "./js/main.js?v=2",
+      "./js/sim.js": "./js/sim.js?v=2",
+      "./js/ai.js": "./js/ai.js?v=2",
+      "./js/room.js": "./js/room.js?v=2",
+      "./js/net.js": "./js/net.js?v=2",
+      "./js/render.js": "./js/render.js?v=2",
+      "./js/input.js": "./js/input.js?v=2",
+      "./js/audio.js": "./js/audio.js?v=2",
+      "./js/looks.js": "./js/looks.js?v=2",
+      "./js/version.js": "./js/version.js?v=2"
     }
   }
   </script>
-  <script type="module" src="js/main.js?v=1"></script>
+  <script type="module" src="js/main.js?v=2"></script>
 </body>
 </html>

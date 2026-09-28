@@ -29,6 +29,12 @@ Läuft ohne Installation und ohne eigenen Server direkt im Browser (GitHub Pages
 - **Power-ups:** 🪨 *Koloss* (schwer und groß, kaum wegzuschubsen), ⚡ *Turbo* (Rammen lädt blitzschnell),
   💥 *Schockwelle* (stößt alle Gegner in der Nähe weg)
 - **Taktik:** Wer zwischen Gegner und Mitte steht, schubst ihn beim Rammen nach außen.
+- **Arenen:** 🌋 *Vulkan* (Klassiker), 🧊 *Gletscher* (rutschig, langer Bremsweg), 🎠 *Karussell* (dreht sich immer
+  schneller und zieht nach außen), 🎲 *Wechselnd* (jede Runde eine andere). Online wählt der Gastgeber.
+- **Zeitlupen-Wiederholung:** Entscheidet ein Stoß die Runde, läuft er noch einmal langsam und aus der Nähe. Tippen überspringt.
+- **Deine Figur:** Hüte und Extras (Partyhut, Zylinder, Cowboyhut, Wikingerhelm, Krone, Heiligenschein, Sonnenbrille,
+  Schnurrbart, Herzbrille). Vieles wird durch Siege und K.O.s freigeschaltet, die Krone nur durch einen Sieg gegen
+  die KI auf „Schwer“. Online sehen alle Mitspieler dein Aussehen. Fortschritt wird im Browser gespeichert.
 
 ## Steuerung
 
@@ -99,9 +105,10 @@ server.js              Kleiner lokaler Entwicklungsserver (nur statische Dateien
 public/index.html      Menüs, Lobby, Anzeige im Spiel
 public/style.css       Styling (Handy zuerst, Hoch- und Querformat)
 public/js/main.js      Ablauf, Spielmodi, Spiel-Loop, Anzeige, Online-Lobby
-public/js/sim.js       Spiellogik ohne Grafik: Arena, Physik, Runden, Power-ups, Netz-Kodierung
+public/js/sim.js       Spiellogik ohne Grafik: Arenen, Physik, Runden, Power-ups, Netz-Kodierung
+public/js/looks.js     Hüte und Extras, Freischalt-Regeln
 public/js/ai.js        KI-Gegner (Leicht / Mittel / Schwer)
-public/js/render.js    3D-Darstellung mit three.js: Lava-Shader, Arena, Figuren, Partikel, Kamera
+public/js/render.js    3D-Darstellung mit three.js: Arena-Themen, Figuren mit Hüten, Vorschau, Partikel, Kamera
 public/js/input.js     Touch-Joystick, Rammen-Taste, geteilter Bildschirm, Tastatur, Gamepad
 public/js/audio.js     Synthetische Soundeffekte (WebAudio)
 public/js/net.js       Peer-to-Peer-Verbindungen (PeerJS/WebRTC)
@@ -112,5 +119,7 @@ test/                  Automatische Tests (npm test)
 
 ### Werte anpassen
 
-Fast alle Spielwerte stehen oben in `public/js/sim.js` im Objekt `CFG`: Laufgeschwindigkeit, Stärke und
+Die Arenen (Rutschigkeit, Drehung, Stoßstärke) stehen in `public/js/sim.js` im Objekt `ARENAS`, ihr Aussehen in
+`public/js/render.js` unter `THEMES`. Neue Hüte kommen in `public/js/looks.js` und `buildHat` in `render.js`.
+Fast alle übrigen Spielwerte stehen oben in `public/js/sim.js` im Objekt `CFG`: Laufgeschwindigkeit, Stärke und
 Abklingzeit des Rammens, wann die Arena bröckelt, Dauer der Power-ups usw. Die KI-Stufen stehen in `public/js/ai.js`.

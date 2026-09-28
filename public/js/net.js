@@ -38,8 +38,9 @@ function netError(type, msg) {
 }
 
 export class Net {
-  constructor(getName) {
+  constructor(getName, getLook = () => null) {
     this.getName = getName;
+    this.getLook = getLook;
     this.handlers = {};
     this.id = null;
     this.peer = null;
@@ -155,7 +156,7 @@ export class Net {
       });
     });
     this.id = host.addClient((m) => queueMicrotask(() => this.onMessage(m)), true);
-    host.handle(this.id, { t: 'hello', name: this.getName() });
+    host.handle(this.id, { t: 'hello', name: this.getName(), look: this.getLook() });
   }
 
   async joinAsClient(code) {
@@ -209,7 +210,7 @@ export class Net {
     if (!m || typeof m.t !== 'string' || m.t === 'hb') return;
     if (m.t === 'welcome') {
       this.id = m.id;
-      if (!this.host) this.send({ t: 'hello', name: this.getName() });
+      if (!this.host) this.send({ t: 'hello', name: this.getName(), look: this.getLook() });
       return;
     }
     if (this.pending) {
