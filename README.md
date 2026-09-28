@@ -7,6 +7,8 @@ genug Taktik drin.
 
 Läuft ohne Installation und ohne eigenen Server direkt im Browser (GitHub Pages), optimiert für Handys im Hoch- und Querformat.
 
+**▶ Jetzt spielen: https://taemo004.github.io/play/**
+
 ## Spielmodi
 
 - **🤖 Gegen KI** – 1 gegen 1 oder 2 gegen 2 (mit KI-Partner), drei Schwierigkeitsstufen
