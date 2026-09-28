@@ -13,6 +13,9 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+body.theme-eis { background: radial-gradient(ellipse at 50% 110%, #3fa7d6 0%, #1b4f8a 38%, #10284f 70%, #08142a 100%) fixed; }
+body.theme-dreh { background: radial-gradient(ellipse at 50% 110%, #d94fc9 0%, #6a1f8a 38%, #2b0f4a 70%, #12072a 100%) fixed; }
+
 html, body {
   margin: 0;
   height: 100%;
@@ -249,3 +252,41 @@ body.duo #hud #btn-quit { top: calc(50% - 38px); }
 @media (hover: hover) and (pointer: fine) {
   .stick-hint span { display: none; }
 }
+
+/* ---------- Arena-Auswahl ---------- */
+.arena-seg button { min-width: 46%; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.center { text-align: center; }
+
+/* ---------- Deine Figur ---------- */
+#look-canvas { width: 100%; height: 200px; display: block; border-radius: 16px; background: radial-gradient(circle at 50% 70%, rgba(255, 120, 80, 0.35), transparent 70%); }
+.look-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.look-item {
+  font: inherit; color: var(--ink); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: rgba(255, 255, 255, 0.06); border: 1.5px solid var(--line); border-radius: 12px; padding: 9px 4px;
+}
+.look-item .li-icon { font-size: 24px; }
+.look-item .li-name { font-size: 12px; font-weight: 700; }
+.look-item.on { border-color: var(--gold); background: rgba(255, 209, 102, 0.18); }
+.look-item.locked { opacity: 0.5; }
+
+/* ---------- Freischaltungen im Ergebnis ---------- */
+#result-unlocks:empty { display: none; }
+#result-unlocks { text-align: center; background: rgba(255, 209, 102, 0.12); border: 1.5px solid var(--gold); border-radius: 14px; padding: 10px; animation: ready 0.5s; }
+.unlock-title { font-weight: 900; color: var(--gold); margin-bottom: 6px; }
+.unlock { display: inline-block; background: rgba(0, 0, 0, 0.3); border-radius: 99px; padding: 5px 12px; margin: 3px; font-weight: 800; }
+
+/* ---------- Zeitlupen-Wiederholung ---------- */
+#replay-badge {
+  display: none; position: fixed; top: calc(12px + var(--safe-t)); left: 50%; transform: translateX(-50%); z-index: 12;
+  font-weight: 900; letter-spacing: 2px; font-size: 15px; background: rgba(0, 0, 0, 0.7); padding: 7px 16px; border-radius: 99px; text-align: center;
+}
+#replay-badge small { display: block; font-size: 10px; letter-spacing: 0; color: var(--muted); font-weight: 700; }
+#replay-badge .rec { color: #ff3b3b; animation: blink 0.6s infinite alternate; }
+body.replaying #replay-badge { display: block; }
+body.replaying::before, body.replaying::after {
+  content: ''; position: fixed; left: 0; right: 0; height: 9vh; background: #000; z-index: 11; pointer-events: none;
+}
+body.replaying::before { top: 0; }
+body.replaying::after { bottom: 0; }
+body.replaying #hud .scorebar, body.replaying #touch, body.replaying #toasts { visibility: hidden; }

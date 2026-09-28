@@ -2,7 +2,8 @@
 // Lobby, Teams, Einstellungen und die eigentliche Partie. Der Gastgeber rechnet die Physik für alle,
 // die Mitspieler schicken nur ihre Eingaben und bekommen ~30× pro Sekunde den Zustand zurück.
 
-import { createMatch, stepMatch, encodeSnap } from './sim.js';
+import { createMatch, stepMatch, encodeSnap, ARENA_MODES } from './sim.js';
+import { sanitizeLook, randomLook } from './looks.js';
 import { createBrain, botThink, DIFFICULTIES } from './ai.js';
 
 export const MAX_PLAYERS = 4;
@@ -28,8 +29,8 @@ export function buildRoster(humans, mode, fill, diff, rng = Math.random) {
   let botId = 100;
   for (const team of [0, 1]) {
     const members = humans.filter((h) => h.team === team);
-    for (const h of members) roster.push({ id: h.id, name: h.name, team });
-    if (fill) for (let k = members.length; k < size; k++) roster.push({ id: botId++, name: names.pop(), team, bot: diff });
+    for (const h of members) roster.push({ id: h.id, name: h.name, team, look: sanitizeLook(h.look) });
+    if (fill) for (let k = members.length; k < size; k++) roster.push({ id: botId++, name: names.pop(), team, bot: diff, look: randomLook(rng) });
   }
   return roster;
 }
@@ -44,6 +45,7 @@ export class RoomHost {
     this.mode = '1v1';
     this.fill = true;
     this.diff = 'normal';
+    this.arena = 'mix';
     this.match = null;
     this.roster = null;
     this.inputs = new Map();
@@ -77,7 +79,7 @@ export class RoomHost {
   }
 
   addClient(send, local = false) {
-    const c = { id: this.nextId++, send, local, lastSeen: Date.now(), name: 'Spieler', team: 0, inRoom: false };
+    const c = { id: this.nextId++, send, local, lastSeen: Date.now(), name: 'Spieler', look: sanitizeLook(null), team: 0, inRoom: false };
     this.clients.set(c.id, c);
     send({ t: 'welcome', id: c.id });
     return c.id;
@@ -116,8 +118,9 @@ export class RoomHost {
       mode: this.mode,
       fill: this.fill,
       diff: this.diff,
+      arena: this.arena,
       problem: this.problem(),
-      players: this.players.map((p) => ({ id: p.id, name: p.name, team: p.team })),
+      players: this.players.map((p) => ({ id: p.id, name: p.name, team: p.team, look: p.look })),
     };
   }
 
@@ -157,6 +160,7 @@ export class RoomHost {
         return;
       case 'hello': {
         c.name = sanitizeName(msg.name);
+        c.look = sanitizeLook(msg.look);
         if (c.inRoom) return this.broadcastRoom();
         if (this.players.length >= MAX_PLAYERS) return c.send({ t: 'error', code: 'full', msg: 'Der Raum ist voll (max. 4 Spieler).' });
         if (this.hostId == null) this.hostId = id;
@@ -183,6 +187,7 @@ export class RoomHost {
         }
         if (typeof msg.fill === 'boolean') this.fill = msg.fill;
         if (DIFFICULTIES[msg.diff]) this.diff = msg.diff;
+        if (ARENA_MODES.includes(msg.arena)) this.arena = msg.arena;
         this.rebalance();
         return this.broadcastRoom();
       }
@@ -220,12 +225,12 @@ export class RoomHost {
   }
 
   startMsg() {
-    return { t: 'start', roster: this.roster, rings: this.match.rings, winRounds: this.match.winRounds };
+    return { t: 'start', roster: this.roster, rings: this.match.rings, winRounds: this.match.winRounds, arena: this.match.arenaMode };
   }
 
   startMatch() {
     this.roster = buildRoster(this.players, this.mode, this.fill, this.diff);
-    this.match = createMatch({ roster: this.roster });
+    this.match = createMatch({ roster: this.roster, arena: this.arena });
     this.brains = new Map(this.roster.filter((r) => r.bot).map((r) => [r.id, createBrain(r.bot, this.match.rng)]));
     this.inputs.clear();
     this.dashSeen.clear();

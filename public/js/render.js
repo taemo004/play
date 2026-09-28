@@ -10,6 +10,50 @@ export const POWER_NAMES = { heavy: 'Koloss', turbo: 'Turbo', shock: 'Schockwell
 const SQRT3 = Math.sqrt(3);
 const MAX_PARTICLES = 320;
 
+// Aussehen der Arenen (Physik steht in sim.js → ARENAS)
+export const THEMES = {
+  lava: {
+    tiles: ['#e0b98f', '#c99a70'],
+    center: '#ffd166',
+    sky: '#ffe9d6',
+    ground: '#ff5a24',
+    rim: '#ff7a3d',
+    liquid: [[0.16, 0.02, 0.03], [0.9, 0.2, 0.03], [1.0, 0.78, 0.3]],
+    ember: '#ffae5c',
+    emberDir: 1,
+    hot: '#ff4a1c',
+    debris: ['#8a6a4f', '#c99a70', '#5a3d2b'],
+    splash: ['#ffcf4d', '#ff6a1c', '#ff3b1c'],
+  },
+  eis: {
+    tiles: ['#eef9ff', '#c4e6f7'],
+    center: '#8fe3ff',
+    sky: '#f2fbff',
+    ground: '#3a7bd5',
+    rim: '#7fd0ff',
+    liquid: [[0.01, 0.04, 0.12], [0.06, 0.3, 0.55], [0.7, 0.93, 1.0]],
+    ember: '#ffffff',
+    emberDir: -1,
+    hot: '#2f8fff',
+    debris: ['#ffffff', '#c4e6f7', '#8fcff0'],
+    splash: ['#ffffff', '#bfe9ff', '#5bb8ff'],
+  },
+  dreh: {
+    tiles: ['#ff7aa8', '#ffd166', '#4de1c1', '#8b9bff', '#ffa45c', '#c38bff'],
+    sectors: true,
+    center: '#ffffff',
+    sky: '#fff0fb',
+    ground: '#b23cff',
+    rim: '#ff6bd6',
+    liquid: [[0.1, 0.02, 0.2], [0.55, 0.1, 0.62], [1.0, 0.6, 0.9]],
+    ember: '#ff9ce6',
+    emberDir: 1,
+    hot: '#ffffff',
+    debris: ['#ff7aa8', '#ffd166', '#4de1c1'],
+    splash: ['#ff9ce6', '#ffffff', '#c38bff'],
+  },
+};
+
 function softDotTexture(inner = 'rgba(255,255,255,1)', outer = 'rgba(255,255,255,0)') {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -33,6 +77,9 @@ void main() {
 
 const LAVA_FRAG = /* glsl */ `
 uniform float uTime;
+uniform vec3 uDark;
+uniform vec3 uMid;
+uniform vec3 uHot;
 varying vec2 vP;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
@@ -49,11 +96,8 @@ void main() {
   vec2 p = vP * 0.16;
   float t = uTime * 0.07;
   float n = fbm(p + vec2(t, -t * 0.7) + fbm(p * 1.7 - vec2(t * 1.3, t)) * 0.9);
-  vec3 dark = vec3(0.16, 0.02, 0.03);
-  vec3 mid = vec3(0.9, 0.2, 0.03);
-  vec3 hot = vec3(1.0, 0.78, 0.3);
-  vec3 col = mix(dark, mid, smoothstep(0.42, 0.6, n));
-  col = mix(col, hot, smoothstep(0.62, 0.8, n));
+  vec3 col = mix(uDark, uMid, smoothstep(0.42, 0.6, n));
+  col = mix(col, uHot, smoothstep(0.62, 0.8, n));
   float r = length(vP);
   float fade = 1.0 - smoothstep(30.0, 80.0, r);
   gl_FragColor = vec4(col, fade);
@@ -79,17 +123,24 @@ export class Renderer {
     this.localIds = new Set();
 
     const hemi = new THREE.HemisphereLight('#ffe9d6', '#ff5a24', 1.5);
+    this.hemi = hemi;
     this.scene.add(hemi);
     const sun = new THREE.DirectionalLight('#ffffff', 2.2);
     sun.position.set(6, 14, 9);
     this.scene.add(sun);
     const rim = new THREE.DirectionalLight('#ff7a3d', 1.4);
+    this.rim = rim;
     rim.position.set(-6, -4, -8);
     this.scene.add(rim);
 
     // Lava
     this.lavaMat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 } },
+      uniforms: {
+        uTime: { value: 0 },
+        uDark: { value: new THREE.Vector3() },
+        uMid: { value: new THREE.Vector3() },
+        uHot: { value: new THREE.Vector3() },
+      },
       vertexShader: LAVA_VERT,
       fragmentShader: LAVA_FRAG,
       transparent: true,
@@ -105,6 +156,9 @@ export class Renderer {
 
     this.arena = new THREE.Group();
     this.scene.add(this.arena);
+    this.theme = null;
+    this.cinematic = null; // Zeitlupen-Kamera { x, z }
+    this.applyTheme('lava');
     this.playersGroup = new THREE.Group();
     this.scene.add(this.playersGroup);
 
@@ -175,6 +229,41 @@ export class Renderer {
     this.scene.add(this.embers);
   }
 
+  applyTheme(id) {
+    const th = THEMES[id] || THEMES.lava;
+    this.theme = id;
+    this.th = th;
+    this.hemi.color.set(th.sky);
+    this.hemi.groundColor.set(th.ground);
+    this.rim.color.set(th.rim);
+    const u = this.lavaMat.uniforms;
+    u.uDark.value.set(...th.liquid[0]);
+    u.uMid.value.set(...th.liquid[1]);
+    u.uHot.value.set(...th.liquid[2]);
+    if (this.embers) this.embers.material.color.set(th.ember);
+    this.hot = new THREE.Color(th.hot);
+    for (const cls of [...document.body.classList]) if (cls.startsWith('theme-')) document.body.classList.remove(cls);
+    document.body.classList.add('theme-' + id);
+    if (this.view && this.tileFx.length) this.colorTiles(this.view);
+  }
+
+  colorTiles(view) {
+    const th = this.th;
+    view.tiles.forEach((t, i) => {
+      const fx = this.tileFx[i];
+      if (!fx) return;
+      let c;
+      if (t.ring === 0) c = th.center;
+      else if (th.sectors) {
+        // Tortenstücke, damit man die Drehung sieht
+        const a = Math.atan2(t.z, t.x) + Math.PI;
+        c = th.tiles[Math.floor((a / (Math.PI * 2)) * 6 + 0.001) % th.tiles.length];
+      } else c = th.tiles[t.ring % 2];
+      fx.base.set(c).offsetHSL(fx.hue, 0, fx.light);
+      if (t.ring === view.rings) fx.base.multiplyScalar(0.85);
+    });
+  }
+
   resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -222,48 +311,23 @@ export class Renderer {
     const n = view.tiles.length;
     this.tileMesh = new THREE.InstancedMesh(geo, mat, n);
     this.tileMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.tileFx = view.tiles.map((t) => {
-      const base = new THREE.Color(t.ring === 0 ? '#ffd166' : t.ring % 2 ? '#e0b98f' : '#c99a70');
-      base.offsetHSL((Math.random() - 0.5) * 0.02, 0, (Math.random() - 0.5) * 0.06);
-      if (t.ring === view.rings) base.multiplyScalar(0.85);
-      return { state: -1, since: 0, base, ax: Math.random() - 0.5, az: Math.random() - 0.5, spin: 1 + Math.random() * 2 };
-    });
-    this.hot = new THREE.Color('#ff4a1c');
+    this.tileFx = view.tiles.map(() => ({
+      state: -1,
+      since: 0,
+      base: new THREE.Color(),
+      hue: (Math.random() - 0.5) * 0.02,
+      light: (Math.random() - 0.5) * 0.06,
+      ax: Math.random() - 0.5,
+      az: Math.random() - 0.5,
+      spin: 1 + Math.random() * 2,
+    }));
     this.arena.add(this.tileMesh);
+    this.applyTheme(view.arena || 'lava');
   }
 
   makePlayer(p) {
-    const color = new THREE.Color(TEAM_COLORS[p.team]);
-    const dark = new THREE.Color(TEAM_DARK[p.team]);
-    const group = new THREE.Group();
-    const inner = new THREE.Group();
-    group.add(inner);
-    const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.42, metalness: 0.02, emissive: new THREE.Color(0) });
-    const body = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 22), bodyMat);
-    inner.add(body);
-    const belt = new THREE.Mesh(new THREE.TorusGeometry(0.97, 0.14, 10, 32), new THREE.MeshStandardMaterial({ color: dark, roughness: 0.6 }));
-    belt.rotation.x = Math.PI / 2;
-    belt.position.y = -0.25;
-    inner.add(belt);
-    const knot = new THREE.Mesh(new THREE.SphereGeometry(0.24, 14, 10), new THREE.MeshStandardMaterial({ color: '#1d1d24', roughness: 0.5 }));
-    knot.position.set(0, 1.02, -0.12);
-    knot.scale.set(1, 0.8, 1.3);
-    inner.add(knot);
-    const white = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.3 });
-    const black = new THREE.MeshBasicMaterial({ color: '#111118' });
-    const eyes = [];
-    for (const s of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), white);
-      eye.position.set(s * 0.32, 0.32, 0.86);
-      inner.add(eye);
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 8), black);
-      pupil.position.set(s * 0.32, 0.32, 1.06);
-      inner.add(pupil);
-      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.07, 0.08), black);
-      brow.position.set(s * 0.32, 0.6, 0.86);
-      inner.add(brow);
-      eyes.push({ pupil, brow, s });
-    }
+    const sumo = buildSumo(p.team, p.look);
+    const { group, inner, bodyMat, color, eyes, hat } = sumo;
     this.playersGroup.add(group);
 
     const ground = new THREE.Group();
@@ -292,7 +356,7 @@ export class Renderer {
     label.querySelector('.pname').textContent = isLocal && this.localIds.size === 1 ? 'DU' : p.name;
     this.labelsEl.appendChild(label);
 
-    return { group, inner, body, bodyMat, color, eyes, ground, shadow, marker, label, icon: label.querySelector('.picon'), rot: Math.atan2(p.fx, p.fz), flash: 0, trail: 0, lastIcon: '', spin: 0 };
+    return { group, inner, bodyMat, color, eyes, hat, ground, shadow, marker, label, icon: label.querySelector('.picon'), rot: Math.atan2(p.fx, p.fz), flash: 0, trail: 0, lastIcon: '', spin: 0 };
   }
 
   renameLabel(id, name) {
@@ -399,8 +463,8 @@ export class Renderer {
         this.shake = Math.max(this.shake, 0.06);
         break;
       case 'splash':
-        this.burst(e.x, CFG.LAVA_Y + 0.2, e.z, ['#ffcf4d', '#ff6a1c', '#ff3b1c'], 34, 5, 9, 0.28, 1.1);
-        this.ring(e.x, CFG.LAVA_Y + 0.05, e.z, '#ffb347', 0.5, 4, 0.8);
+        this.burst(e.x, CFG.LAVA_Y + 0.2, e.z, this.th.splash, 34, 5, 9, 0.28, 1.1);
+        this.ring(e.x, CFG.LAVA_Y + 0.05, e.z, this.th.splash[0], 0.5, 4, 0.8);
         break;
       case 'power':
         this.burst(e.x, 0.8, e.z, [POWER_COLORS[e.kind], '#ffffff'], 24, 4, 5, 0.18, 0.7);
@@ -427,6 +491,8 @@ export class Renderer {
   render(view, dt) {
     this.view = view;
     this.time += dt;
+    if ((view.arena || 'lava') !== this.theme) this.applyTheme(view.arena || 'lava');
+    this.arena.rotation.y = -(view.angle || 0);
     this.lavaMat.uniforms.uTime.value = this.time;
     this.updateEmbers(dt);
     this.updateTiles(view, dt);
@@ -441,8 +507,9 @@ export class Renderer {
   updateEmbers(dt) {
     const pos = this.embers.geometry.getAttribute('position');
     for (let i = 0; i < pos.count; i++) {
-      let y = pos.getY(i) + this.emberSpeed[i] * dt;
+      let y = pos.getY(i) + this.emberSpeed[i] * dt * this.th.emberDir;
       if (y > CFG.LAVA_Y + 15) y = CFG.LAVA_Y;
+      if (y < CFG.LAVA_Y) y = CFG.LAVA_Y + 15;
       pos.setY(i, y);
     }
     pos.needsUpdate = true;
@@ -456,7 +523,12 @@ export class Renderer {
       if (fx.state !== t.state) {
         fx.state = t.state;
         fx.since = 0;
-        if (t.state === 2) this.burst(t.x, -0.2, t.z, ['#8a6a4f', '#c99a70', '#5a3d2b'], 4, 1.5, 1.5, 0.22, 0.8);
+        if (t.state === 2) {
+          const a = view.angle || 0;
+          const wx = t.x * Math.cos(a) - t.z * Math.sin(a);
+          const wz = t.x * Math.sin(a) + t.z * Math.cos(a);
+          this.burst(wx, -0.2, wz, this.th.debris, 4, 1.5, 1.5, 0.22, 0.8);
+        }
       } else fx.since += dt;
       let x = t.x;
       let y = 0;
@@ -527,6 +599,7 @@ export class Renderer {
       else o.spin *= Math.exp(-dt * 10);
       o.inner.rotation.z = stunned ? Math.sin(this.time * 32) * 0.28 : 0;
       o.inner.rotation.x = p.falling ? -o.spin : 0;
+      if (o.hat && o.hat.userData.bob) o.hat.position.y = o.hat.userData.bob + Math.sin(this.time * 3 + p.slot) * 0.06;
       // Augen
       for (const e of o.eyes) {
         if (stunned || p.falling) {
@@ -647,15 +720,30 @@ export class Renderer {
       cx = (cx / n) * 0.12;
       cz = (cz / n) * 0.12;
     }
-    this.focus.x += (cx - this.focus.x) * Math.min(1, dt * 2);
-    this.focus.z += (cz - this.focus.z) * Math.min(1, dt * 2);
+    let dist2 = dist;
+    let el2 = el;
+    let follow = 2;
+    if (this.cinematic) {
+      // Zeitlupe: nah ran an das Opfer, flacher Blickwinkel
+      cx = this.cinematic.x * 0.85;
+      cz = this.cinematic.z * 0.85;
+      dist2 = Math.min(dist, 11);
+      el2 = (40 * Math.PI) / 180;
+      follow = 3;
+    }
+    this.camDist = this.camDist ? this.camDist + (dist2 - this.camDist) * Math.min(1, dt * follow) : dist2;
+    this.camEl = this.camEl ? this.camEl + (el2 - this.camEl) * Math.min(1, dt * follow) : el2;
+    this.focus.x += (cx - this.focus.x) * Math.min(1, dt * follow);
+    this.focus.z += (cz - this.focus.z) * Math.min(1, dt * follow);
     const az = this.azimuth;
     this.shake = Math.max(0, this.shake - dt * 1.6);
     const sh = this.shake * this.shake * 1.2;
+    const cd = this.camDist;
+    const ce = this.camEl;
     cam.position.set(
-      this.focus.x + Math.sin(az) * Math.cos(el) * dist + (Math.random() - 0.5) * sh,
-      Math.sin(el) * dist + (Math.random() - 0.5) * sh,
-      this.focus.z + Math.cos(az) * Math.cos(el) * dist + (Math.random() - 0.5) * sh,
+      this.focus.x + Math.sin(az) * Math.cos(ce) * cd + (Math.random() - 0.5) * sh,
+      Math.sin(ce) * cd + (Math.random() - 0.5) * sh,
+      this.focus.z + Math.cos(az) * Math.cos(ce) * cd + (Math.random() - 0.5) * sh,
     );
     cam.up.set(0, 1, 0);
     cam.lookAt(this.focus.x, -0.6, this.focus.z);
@@ -680,5 +768,229 @@ export class Renderer {
       v.copy(o.group.position).setY(o.group.position.y + 0.8).project(this.camera);
       o.label.style.transform = `translate(${((v.x + 1) / 2) * w}px, ${((1 - v.y) / 2) * h}px) translate(-50%, -100%)`;
     }
+  }
+}
+
+// ---------- Figur (Spiel und Vorschau) ----------
+
+function mat(color, opts = {}) {
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.5, ...opts });
+}
+
+// Baut eine Sumo-Figur in Einheitsgröße (Radius 1). Blickrichtung +z.
+export function buildSumo(team, look = {}) {
+  const color = new THREE.Color(TEAM_COLORS[team] || TEAM_COLORS[0]);
+  const dark = new THREE.Color(TEAM_DARK[team] || TEAM_DARK[0]);
+  const group = new THREE.Group();
+  const inner = new THREE.Group();
+  group.add(inner);
+  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.42, metalness: 0.02, emissive: new THREE.Color(0) });
+  inner.add(new THREE.Mesh(new THREE.SphereGeometry(1, 32, 22), bodyMat));
+  const belt = new THREE.Mesh(new THREE.TorusGeometry(0.97, 0.14, 10, 32), mat(dark, { roughness: 0.6 }));
+  belt.rotation.x = Math.PI / 2;
+  belt.position.y = -0.25;
+  inner.add(belt);
+  const white = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.3 });
+  const black = new THREE.MeshBasicMaterial({ color: '#111118' });
+  const eyes = [];
+  for (const s of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), white);
+    eye.position.set(s * 0.32, 0.32, 0.86);
+    inner.add(eye);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 8), black);
+    pupil.position.set(s * 0.32, 0.32, 1.06);
+    inner.add(pupil);
+    const brow = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.07, 0.08), black);
+    brow.position.set(s * 0.32, 0.6, 0.86);
+    inner.add(brow);
+    eyes.push({ pupil, brow, s });
+  }
+  const hat = buildHat(look.hat);
+  if (hat) inner.add(hat);
+  else {
+    const knot = new THREE.Mesh(new THREE.SphereGeometry(0.24, 14, 10), mat('#1d1d24'));
+    knot.position.set(0, 1.02, -0.12);
+    knot.scale.set(1, 0.8, 1.3);
+    inner.add(knot);
+  }
+  const extra = buildExtra(look.extra);
+  if (extra) inner.add(extra);
+  return { group, inner, bodyMat, color, eyes, hat };
+}
+
+function buildHat(id) {
+  const g = new THREE.Group();
+  const add = (geo, material, x, y, z, rx = 0, ry = 0, rz = 0) => {
+    const m = new THREE.Mesh(geo, material);
+    m.position.set(x, y, z);
+    m.rotation.set(rx, ry, rz);
+    g.add(m);
+    return m;
+  };
+  switch (id) {
+    case 'party': {
+      add(new THREE.ConeGeometry(0.38, 0.85, 20), mat('#ff5fa2'), 0, 1.3, 0, 0, 0, 0.15);
+      add(new THREE.TorusGeometry(0.3, 0.05, 8, 20), mat('#ffe14d'), -0.02, 1.08, 0, Math.PI / 2, 0, 0.15);
+      add(new THREE.SphereGeometry(0.13, 12, 10), mat('#ffe14d'), -0.1, 1.72, 0);
+      break;
+    }
+    case 'zylinder': {
+      const black = mat('#1b1b22', { roughness: 0.35 });
+      add(new THREE.CylinderGeometry(0.62, 0.62, 0.06, 28), black, 0, 0.93, 0);
+      add(new THREE.CylinderGeometry(0.4, 0.42, 0.62, 28), black, 0, 1.25, 0);
+      add(new THREE.CylinderGeometry(0.425, 0.425, 0.1, 28), mat('#d7263d'), 0, 1.01, 0);
+      break;
+    }
+    case 'cowboy': {
+      const brown = mat('#9a5b2e', { roughness: 0.8 });
+      add(new THREE.CylinderGeometry(0.9, 0.9, 0.05, 32), brown, 0, 0.88, 0);
+      add(new THREE.TorusGeometry(0.88, 0.06, 8, 32), brown, 0, 0.93, 0, Math.PI / 2);
+      const crown = add(new THREE.SphereGeometry(0.5, 20, 14), brown, 0, 1.08, 0);
+      crown.scale.set(0.95, 0.75, 1.1);
+      add(new THREE.CylinderGeometry(0.49, 0.49, 0.09, 24), mat('#3b2412'), 0, 0.98, 0);
+      break;
+    }
+    case 'wikinger': {
+      const metal = mat('#9aa3ad', { metalness: 0.6, roughness: 0.35 });
+      add(new THREE.SphereGeometry(1.04, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2.9), metal, 0, 0.02, 0);
+      add(new THREE.TorusGeometry(0.87, 0.06, 8, 28), mat('#6b4a2b'), 0, 0.52, 0, Math.PI / 2);
+      const horn = mat('#f3ead7', { roughness: 0.6 });
+      for (const s of [-1, 1]) add(new THREE.ConeGeometry(0.14, 0.62, 14), horn, s * 0.78, 0.98, 0, 0, 0, -s * 0.75);
+      break;
+    }
+    case 'krone': {
+      const gold = mat('#ffc83d', { metalness: 0.7, roughness: 0.25, emissive: new THREE.Color('#5a3a00') });
+      add(new THREE.CylinderGeometry(0.46, 0.42, 0.28, 16, 1, true), gold, 0, 1.0, 0).material.side = THREE.DoubleSide;
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        add(new THREE.ConeGeometry(0.09, 0.26, 8), gold, Math.sin(a) * 0.44, 1.25, Math.cos(a) * 0.44);
+        add(new THREE.SphereGeometry(0.055, 8, 6), mat(i % 2 ? '#ff3b6b' : '#3de1ff', { emissive: new THREE.Color('#330011') }), Math.sin(a) * 0.45, 1.0, Math.cos(a) * 0.45);
+      }
+      break;
+    }
+    case 'heiligenschein': {
+      add(
+        new THREE.TorusGeometry(0.45, 0.07, 10, 32),
+        new THREE.MeshStandardMaterial({ color: '#fff2a8', emissive: new THREE.Color('#ffd84d'), emissiveIntensity: 1.2 }),
+        0,
+        0,
+        0,
+        Math.PI / 2,
+      );
+      g.position.y = 1.45;
+      g.userData.bob = 1.45;
+      break;
+    }
+    default:
+      return null;
+  }
+  return g;
+}
+
+function buildExtra(id) {
+  const g = new THREE.Group();
+  const add = (geo, material, x, y, z, rx = 0, ry = 0, rz = 0) => {
+    const m = new THREE.Mesh(geo, material);
+    m.position.set(x, y, z);
+    m.rotation.set(rx, ry, rz);
+    g.add(m);
+    return m;
+  };
+  switch (id) {
+    case 'sonnenbrille': {
+      const lens = mat('#0d0d12', { roughness: 0.1, metalness: 0.5 });
+      for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.38, 0.22, 0.06), lens, s * 0.32, 0.34, 1.1);
+      add(new THREE.BoxGeometry(0.3, 0.05, 0.05), lens, 0, 0.4, 1.12);
+      break;
+    }
+    case 'schnurrbart': {
+      const hair = mat('#3b2412', { roughness: 0.9 });
+      for (const s of [-1, 1]) {
+        const m = add(new THREE.SphereGeometry(0.2, 12, 8), hair, s * 0.17, 0.05, 1.0, 0, 0, s * 0.35);
+        m.scale.set(1.2, 0.35, 0.45);
+      }
+      break;
+    }
+    case 'herzbrille': {
+      const red = mat('#ff3b6b', { emissive: new THREE.Color('#5a0018') });
+      for (const s of [-1, 1]) {
+        // Herz aus zwei Kugeln und einem Kegel
+        const h = new THREE.Group();
+        const k1 = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 8), red);
+        k1.position.set(-0.075, 0.04, 0);
+        const k2 = k1.clone();
+        k2.position.x = 0.075;
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.2, 12), red);
+        tip.rotation.z = Math.PI;
+        tip.position.y = -0.08;
+        h.add(k1, k2, tip);
+        h.scale.set(1.3, 1.3, 0.5);
+        h.position.set(s * 0.32, 0.34, 1.1);
+        g.add(h);
+      }
+      break;
+    }
+    default:
+      return null;
+  }
+  return g;
+}
+
+// Kleine drehende Vorschau der eigenen Figur (Menü „Deine Figur“)
+export class Preview {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    this.renderer.setClearColor(0x000000, 0);
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(32, 1, 0.1, 50);
+    this.camera.position.set(0, 1.6, 6.2);
+    this.camera.lookAt(0, 0.35, 0);
+    this.scene.add(new THREE.HemisphereLight('#ffffff', '#ff7a5a', 1.6));
+    const sun = new THREE.DirectionalLight('#ffffff', 2);
+    sun.position.set(3, 5, 6);
+    this.scene.add(sun);
+    this.sumo = null;
+    this.running = false;
+    this.t = 0;
+  }
+
+  setLook(look, team = 0) {
+    if (this.sumo) this.scene.remove(this.sumo.group);
+    this.sumo = buildSumo(team, look);
+    this.scene.add(this.sumo.group);
+  }
+
+  start() {
+    if (this.running) return;
+    this.running = true;
+    let last = performance.now();
+    const loop = (now) => {
+      if (!this.running) return;
+      requestAnimationFrame(loop);
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      this.t += dt;
+      const w = this.canvas.clientWidth;
+      const h = this.canvas.clientHeight;
+      if (this.canvas.width !== Math.round(w * devicePixelRatio)) {
+        this.renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+        this.renderer.setSize(w, h, false);
+        this.camera.aspect = w / h;
+        this.camera.updateProjectionMatrix();
+      }
+      if (this.sumo) {
+        this.sumo.group.rotation.y = Math.sin(this.t * 0.8) * 0.7;
+        this.sumo.inner.position.y = Math.abs(Math.sin(this.t * 3)) * 0.12;
+        const hat = this.sumo.hat;
+        if (hat && hat.userData.bob) hat.position.y = hat.userData.bob + Math.sin(this.t * 3) * 0.06;
+      }
+      this.renderer.render(this.scene, this.camera);
+    };
+    requestAnimationFrame(loop);
+  }
+
+  stop() {
+    this.running = false;
   }
 }

@@ -2,7 +2,8 @@
 import { APP_VERSION } from './version.js';
 import { createMatch, stepMatch, applySnap, applyTiles, CFG } from './sim.js';
 import { createBrain, botThink } from './ai.js';
-import { Renderer, POWER_ICONS, POWER_NAMES } from './render.js';
+import { Renderer, Preview, POWER_ICONS, POWER_NAMES } from './render.js';
+import { HATS, EXTRAS, EMPTY_STATS, isUnlocked, sanitizeLook, randomLook, newlyUnlocked } from './looks.js';
 import { Controls } from './input.js';
 import { Sfx } from './audio.js';
 import { Net } from './net.js';
@@ -55,7 +56,16 @@ const store = {
   },
 };
 
+const ARENA_LABEL = {
+  lava: '🌋 Vulkan',
+  eis: '🧊 Gletscher – rutschig!',
+  dreh: '🎠 Karussell – dreht immer schneller',
+};
+const REPLAY_SPEED = 0.42;
+
 const settings = {
+  aiArena: store.get('aiArena', 'lava'),
+  localArena: store.get('localArena', 'lava'),
   aiMode: store.get('aiMode', '1v1'),
   aiDiff: store.get('aiDiff', 'normal'),
   localMode: store.get('localMode', '1v1'),
@@ -65,7 +75,26 @@ const settings = {
 const renderer = new Renderer($('#game'), $('#labels'));
 const controls = new Controls($('#touch'));
 const sfx = new Sfx();
-const net = new Net(() => playerName());
+const net = new Net(() => playerName(), () => myLook());
+
+function loadJSON(key, fallback) {
+  try {
+    return { ...fallback, ...JSON.parse(store.get(key, '{}')) };
+  } catch {
+    return { ...fallback };
+  }
+}
+function loadStats() {
+  return loadJSON('stats', EMPTY_STATS);
+}
+// Nur freigeschaltete Teile tragen (falls der Speicher verändert wurde)
+function myLook() {
+  const look = sanitizeLook(loadJSON('look', {}));
+  const stats = loadStats();
+  if (!isUnlocked(HATS.find((h) => h.id === look.hat), stats)) look.hat = 'none';
+  if (!isUnlocked(EXTRAS.find((e) => e.id === look.extra), stats)) look.extra = 'none';
+  return look;
+}
 
 let session = null;
 let room = null; // letzter Lobby-Stand (online)
@@ -95,11 +124,13 @@ class LocalSession {
     this.localIds = humans.map((h) => h.pid);
     this.azimuth = 0;
     this.topDown = !!opts.topDown;
+    this.arena = opts.arena || 'lava';
+    this.diff = opts.diff || null;
     this.start();
   }
 
   start() {
-    this.match = createMatch({ roster: this.roster });
+    this.match = createMatch({ roster: this.roster, arena: this.arena });
     this.brains = new Map(this.roster.filter((r) => r.bot).map((r) => [r.id, createBrain(r.bot, this.match.rng)]));
     this.acc = 0;
     this.lastDash = new Map();
@@ -164,7 +195,7 @@ class HostSession {
 class ClientSession {
   constructor(msg) {
     this.kind = 'client';
-    this.match = createMatch({ roster: msg.roster, rings: msg.rings, winRounds: msg.winRounds, seed: 1 });
+    this.match = createMatch({ roster: msg.roster, rings: msg.rings, winRounds: msg.winRounds, arena: msg.arena, seed: 1 });
     this.match.events.length = 0;
     const me = msg.roster.find((r) => r.id === net.id);
     this.isPlayer = !!me;
@@ -242,12 +273,12 @@ class ClientSession {
 
 function demoSession() {
   const roster = [
-    { id: 1, name: 'Knödel', team: 0, bot: 'normal' },
-    { id: 2, name: 'Moppel', team: 1, bot: 'normal' },
-    { id: 3, name: 'Brocken', team: 0, bot: 'hard' },
-    { id: 4, name: 'Kugelblitz', team: 1, bot: 'hard' },
+    { id: 1, name: 'Knödel', team: 0, bot: 'normal', look: randomLook() },
+    { id: 2, name: 'Moppel', team: 1, bot: 'normal', look: randomLook() },
+    { id: 3, name: 'Brocken', team: 0, bot: 'hard', look: randomLook() },
+    { id: 4, name: 'Kugelblitz', team: 1, bot: 'hard', look: randomLook() },
   ];
-  const s = new LocalSession('demo', roster, []);
+  const s = new LocalSession('demo', roster, [], { arena: 'mix' });
   s.match.winRounds = 99;
   return s;
 }
@@ -256,9 +287,13 @@ function demoSession() {
 
 function show(id) {
   for (const el of $$('.screen')) el.classList.toggle('hidden', el.id !== id);
+  if (id === 'scr-look') openLookScreen();
+  else if (preview) preview.stop();
 }
 
 function setSession(s, { playing }) {
+  stopReplay();
+  recording.length = 0;
   session = s;
   clearTimeout(resultTimer);
   lastCount = 0;
@@ -292,26 +327,27 @@ function startAi() {
   sfx.unlock();
   const size = settings.aiMode === '2v2' ? 2 : 1;
   const names = ['Knödel', 'Dampfwalze', 'Moppel', 'Brocken'];
-  const roster = [{ id: 1, name: playerName(), team: 0 }];
-  if (size === 2) roster.push({ id: 2, name: 'Partner-KI', team: 0, bot: settings.aiDiff });
-  for (let k = 0; k < size; k++) roster.push({ id: 10 + k, name: names[k], team: 1, bot: settings.aiDiff });
-  setSession(new LocalSession('ai', roster, [{ pid: 1, slot: 0 }]), { playing: true });
+  const roster = [{ id: 1, name: playerName(), team: 0, look: myLook() }];
+  if (size === 2) roster.push({ id: 2, name: 'Partner-KI', team: 0, bot: settings.aiDiff, look: randomLook() });
+  for (let k = 0; k < size; k++) roster.push({ id: 10 + k, name: names[k], team: 1, bot: settings.aiDiff, look: randomLook() });
+  const s = new LocalSession('ai', roster, [{ pid: 1, slot: 0 }], { arena: settings.aiArena, diff: settings.aiDiff });
+  setSession(s, { playing: true });
 }
 
 function startLocal() {
   sfx.unlock();
   const roster = [
-    { id: 1, name: 'Spieler 1', team: 0 },
-    { id: 2, name: 'Spieler 2', team: 1 },
+    { id: 1, name: 'Spieler 1', team: 0, look: myLook() },
+    { id: 2, name: 'Spieler 2', team: 1, look: randomLook() },
   ];
   if (settings.localMode === '2v2') {
-    roster.push({ id: 3, name: 'KI Rot', team: 0, bot: settings.localDiff });
-    roster.push({ id: 4, name: 'KI Blau', team: 1, bot: settings.localDiff });
+    roster.push({ id: 3, name: 'KI Rot', team: 0, bot: settings.localDiff, look: randomLook() });
+    roster.push({ id: 4, name: 'KI Blau', team: 1, bot: settings.localDiff, look: randomLook() });
   }
   const s = new LocalSession('local', roster, [
     { pid: 1, slot: 0 },
     { pid: 2, slot: 1 },
-  ], { topDown: true });
+  ], { topDown: true, arena: settings.localArena });
   setSession(s, { playing: true });
 }
 
@@ -335,9 +371,118 @@ function frame(t) {
     if (v.phase === 'roundEnd' && v.phaseT > 2.5 && v.score[0] + v.score[1] >= 5) session.start();
   }
   handleEvents(events);
-  renderer.render(session.view, dt);
+  if (session.kind !== 'demo') record(session.view, events);
+  if (replayPending && (replayPending.wait -= dt) <= 0) {
+    const info = replayPending.info;
+    replayPending = null;
+    startReplay(info);
+  }
+  if (replay) updateReplay(dt);
+  else renderer.render(session.view, dt);
   if (session.kind !== 'demo') updateHud(session.view);
 }
+
+// ---------- Zeitlupen-Wiederholung ----------
+// Die letzten Sekunden werden mitgeschnitten. Endet eine Runde durch einen Stoß,
+// läuft der entscheidende Moment noch einmal langsam und aus der Nähe.
+
+const recording = [];
+let replay = null;
+let replayPending = null;
+
+function record(view, events) {
+  const last = recording[recording.length - 1];
+  if (last && view.time < last.t - 0.5) recording.length = 0; // neue Partie
+  if (last && view.time <= last.t) {
+    if (events.length) last.events.push(...events);
+    return;
+  }
+  recording.push({
+    t: view.time,
+    angle: view.angle || 0,
+    tiles: view.tiles.map((t) => t.state),
+    players: view.players.map((p) => ({
+      x: p.x,
+      y: p.y,
+      z: p.z,
+      fx: p.fx,
+      fz: p.fz,
+      dashT: p.dashT,
+      stunT: p.stunT,
+      heavyT: p.heavyT,
+      turboT: p.turboT,
+      radius: p.radius,
+      falling: p.falling,
+      doomed: p.doomed,
+      out: p.out,
+    })),
+    events: events.filter((e) => ['hit', 'clash', 'bump', 'splash', 'dash', 'shock', 'power'].includes(e.type)),
+  });
+  while (recording.length && recording[0].t < view.time - 3) recording.shift();
+}
+
+function scheduleReplay(info) {
+  if (!info || session.kind === 'demo') return;
+  replayPending = { info, wait: 0.7 };
+}
+
+function startReplay(info) {
+  const frames = recording.filter((f) => f.t >= info.t - 1.25 && f.t <= info.t + 0.4);
+  if (frames.length < 10) return;
+  const v = session.view;
+  // Eigene Ansicht der Partie für die Wiederholung (die echte läuft im Hintergrund weiter)
+  const rv = {
+    ...v,
+    players: v.players.map((p) => ({ ...p })),
+    tiles: v.tiles.map((t) => ({ ...t })),
+    powerups: [],
+  };
+  replay = { frames, t: frames[0].t, idx: 0, rv, victim: info.victim };
+  document.body.classList.add('replaying');
+  renderer.labelsEl.classList.add('hidden');
+}
+
+function stopReplay() {
+  replayPending = null;
+  if (!replay) return;
+  replay = null;
+  renderer.cinematic = null;
+  document.body.classList.remove('replaying');
+  renderer.labelsEl.classList.remove('hidden');
+}
+
+function updateReplay(dt) {
+  const r = replay;
+  r.t += dt * REPLAY_SPEED;
+  const f = r.frames;
+  while (r.idx < f.length - 1 && f[r.idx + 1].t <= r.t) {
+    r.idx++;
+    for (const e of f[r.idx].events) {
+      renderer.onEvent(e);
+      if (e.type === 'hit' || e.type === 'clash' || e.type === 'splash') sfx.play(e.type, 0.8);
+    }
+  }
+  const a = f[r.idx];
+  const b = f[Math.min(r.idx + 1, f.length - 1)];
+  const k = b.t > a.t ? Math.min(1, Math.max(0, (r.t - a.t) / (b.t - a.t))) : 0;
+  const rv = r.rv;
+  rv.angle = a.angle + (b.angle - a.angle) * k;
+  rv.tiles.forEach((t, i) => (t.state = a.tiles[i]));
+  rv.players.forEach((p, i) => {
+    const pa = a.players[i];
+    const pb = b.players[i];
+    Object.assign(p, pa);
+    for (const key of ['x', 'y', 'z', 'fx', 'fz']) p[key] = pa[key] + (pb[key] - pa[key]) * k;
+  });
+  const victim = rv.players.find((p) => p.id === r.victim);
+  if (victim) renderer.cinematic = { x: victim.x, z: victim.z };
+  renderer.render(rv, dt * REPLAY_SPEED);
+  if (r.idx >= f.length - 1) stopReplay();
+}
+
+// Tippen überspringt die Wiederholung
+window.addEventListener('pointerdown', () => replay && stopReplay(), true);
+window.addEventListener('keydown', () => replay && stopReplay(), true);
 requestAnimationFrame(frame);
 
 function nameOf(id, cap = false) {
@@ -363,7 +508,7 @@ function handleEvents(events) {
   const mine = (id) => session.localIds.includes(id);
   const single = session.localIds.length === 1;
   for (const e of events) {
-    renderer.onEvent(e);
+    if (!replay) renderer.onEvent(e);
     if (demo) continue;
     switch (e.type) {
       case 'dash':
@@ -409,7 +554,8 @@ function handleEvents(events) {
         sfx.play('shock');
         break;
       case 'round':
-        setBanner(`Runde ${e.round}`, 'gold');
+        stopReplay();
+        setBanner(`Runde ${e.round}<small>${ARENA_LABEL[e.arena] || ''}</small>`, 'gold');
         break;
       case 'go':
         sfx.play('go');
@@ -425,7 +571,8 @@ function handleEvents(events) {
           text = single && myTeam !== null ? (w === myTeam ? 'Runde gewonnen!' : 'Runde verloren') : `${w === 0 ? 'Rot' : 'Blau'} holt die Runde!`;
           sfx.play(single && myTeam !== null && w !== myTeam ? 'lose' : 'win');
         }
-        setBanner(`${text}<small>${e.score[0]} : ${e.score[1]}</small>`, cls, 2600);
+        setBanner(`${text}<small>${e.score[0]} : ${e.score[1]}</small>`, cls, e.replay ? 1100 : 2600);
+        scheduleReplay(e.replay);
         break;
       }
       case 'matchEnd':
@@ -530,6 +677,30 @@ function showResult() {
     sfx.play('win');
   }
   $('#result-sub').textContent = `Endstand ${v.score[0]} : ${v.score[1]}`;
+  // Eigene Statistik fortschreiben und neu Freigeschaltetes zeigen
+  const unlockBox = $('#result-unlocks');
+  unlockBox.innerHTML = '';
+  const me = myTeam !== null && v.players.find((p) => p.id === session.localIds[0]);
+  if (me && session.kind !== 'local') {
+    const won = w === me.team;
+    const before = loadStats();
+    const after = {
+      ...before,
+      games: before.games + 1,
+      wins: before.wins + (won ? 1 : 0),
+      kos: before.kos + me.stats.ko,
+      hardWins: before.hardWins + (won && session.kind === 'ai' && session.diff === 'hard' ? 1 : 0),
+      flawless: before.flawless + (won && me.stats.falls === 0 ? 1 : 0),
+    };
+    store.set('stats', JSON.stringify(after));
+    const fresh = newlyUnlocked(before, after);
+    if (fresh.length) {
+      unlockBox.innerHTML =
+        '<div class="unlock-title">Neu freigeschaltet!</div>' +
+        fresh.map((it) => `<span class="unlock">${it.icon} ${esc(it.name)}</span>`).join('') +
+        '<div class="hint small">Anziehen unter „Deine Figur“ im Menü</div>';
+    }
+  }
   const rows = [...v.players].sort((a, b) => a.team - b.team || b.stats.ko - a.stats.ko);
   $('#result-stats').innerHTML = rows
     .map((p) => `<tr class="team${p.team}"><td>${esc(p.name)}${session.localIds.includes(p.id) && session.localIds.length === 1 ? ' (Du)' : ''}</td><td>${p.stats.ko}</td><td>${p.stats.falls}</td></tr>`)
@@ -731,6 +902,11 @@ net.on('hostlost', () => {
 });
 $('#btn-msg-ok').addEventListener('click', () => show('scr-menu'));
 
+function hatIcon(look) {
+  const hat = look && HATS.find((h) => h.id === look.hat);
+  return hat && hat.id !== 'none' ? hat.icon : '';
+}
+
 function renderLobby() {
   if (!room) return;
   const size = teamSizeOf(room.mode);
@@ -741,7 +917,7 @@ function renderLobby() {
     let html = members
       .map(
         (p) =>
-          `<li>${p.id === room.hostId ? '👑 ' : ''}${esc(p.name)}${p.id === net.id ? '<span class="tag">DU</span>' : ''}</li>`,
+          `<li>${p.id === room.hostId ? '⭐ ' : ''}${esc(p.name)} ${hatIcon(p.look)}${p.id === net.id ? '<span class="tag">DU</span>' : ''}</li>`,
       )
       .join('');
     for (let k = members.length; k < size; k++) html += room.fill ? '<li class="bot">🤖 KI</li>' : '<li class="empty">frei</li>';
@@ -808,6 +984,59 @@ $('#btn-share').addEventListener('click', async () => {
     $('#lobby-info').textContent = url;
   }
 });
+
+// ---------- Deine Figur ----------
+
+let preview = null;
+
+function openLookScreen() {
+  if (!preview) {
+    try {
+      preview = new Preview($('#look-canvas'));
+    } catch {
+      preview = null;
+    }
+  }
+  renderLookScreen();
+  if (preview) preview.start();
+}
+
+function renderLookScreen() {
+  const stats = loadStats();
+  const look = myLook();
+  const grid = (items, key) =>
+    items
+      .map((it) => {
+        const open = isUnlocked(it, stats);
+        const on = look[key] === it.id;
+        return `<button class="look-item${on ? ' on' : ''}${open ? '' : ' locked'}" data-key="${key}" data-id="${it.id}">
+          <span class="li-icon">${open ? it.icon : '🔒'}</span><span class="li-name">${esc(it.name)}</span></button>`;
+      })
+      .join('');
+  $('#hat-grid').innerHTML = grid(HATS, 'hat');
+  $('#extra-grid').innerHTML = grid(EXTRAS, 'extra');
+  $('#look-stats').textContent = `Siege: ${stats.wins} · K.O.s: ${stats.kos} · Partien: ${stats.games}`;
+  if (preview) preview.setLook(look, 0);
+}
+
+for (const id of ['#hat-grid', '#extra-grid']) {
+  $(id).addEventListener('click', (e) => {
+    const b = e.target.closest('.look-item');
+    if (!b) return;
+    sfx.play('click');
+    const list = b.dataset.key === 'hat' ? HATS : EXTRAS;
+    const item = list.find((it) => it.id === b.dataset.id);
+    if (!isUnlocked(item, loadStats())) {
+      $('#look-hint').textContent = `🔒 ${item.name}: ${item.hint}`;
+      return;
+    }
+    $('#look-hint').textContent = '';
+    const look = myLook();
+    look[b.dataset.key] = item.id;
+    store.set('look', JSON.stringify(look));
+    renderLookScreen();
+  });
+}
 
 // ---------- Start ----------
 

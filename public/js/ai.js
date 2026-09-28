@@ -1,5 +1,5 @@
 // KI-Gegner: entscheidet in kurzen Abständen (Reaktionszeit), wohin sie läuft und wann sie rammt.
-import { CFG, safeRadius, isSolid } from './sim.js';
+import { CFG, ARENAS, safeRadius, isSolid } from './sim.js';
 
 export const DIFFICULTIES = {
   easy: { label: 'Leicht', react: 0.42, aim: 0.6, dashRange: 3.0, dashProb: 0.4, margin: 0.3, dodge: 0, speed: 0.75, recover: 0.15, power: 0.3, careful: false },
@@ -37,14 +37,16 @@ function decide(m, p, brain) {
     const c = norm(-p.x, -p.z);
     return { x: c.x * 0.3 + Math.cos(brain.wander) * 0.25, z: c.z * 0.3 + Math.sin(brain.wander) * 0.25, dash: false };
   }
-  const safeR = safeRadius(m) - d.margin * 0.5;
+  // Auf Eis rutscht man länger – weiter vorausschauen
+  const slide = 8 / ARENAS[m.arena].control;
+  const safeR = safeRadius(m) - d.margin * 0.5 * Math.sqrt(slide);
   const pos = norm(p.x, p.z);
   const radial = pos.l > 1e-6 ? (p.x * p.vx + p.z * p.vz) / pos.l : 0;
   const canDash = p.cool <= 0 && p.stunT <= CFG.STUN_DASH_OK;
-  const ahead = { x: p.x + p.vx * 0.3, z: p.z + p.vz * 0.3 };
+  const ahead = { x: p.x + p.vx * 0.3 * slide, z: p.z + p.vz * 0.3 * slide };
 
   // 1) Gefahr am Rand oder über einem Loch → zurück zur Mitte, notfalls mit Sprint
-  const danger = pos.l > safeR - 0.4 || pos.l + Math.max(0, radial) * 0.35 > safeR || (d.careful && !isSolid(m, ahead.x, ahead.z));
+  const danger = pos.l > safeR - 0.4 || pos.l + Math.max(0, radial) * 0.35 * slide > safeR || (d.careful && !isSolid(m, ahead.x, ahead.z));
   if (danger) {
     const home = norm(-p.x, -p.z);
     const dash = canDash && radial > 3 && rng() < d.recover;
@@ -101,7 +103,7 @@ function decide(m, p, brain) {
     const az = target.z + target.vz * lead + (rng() - 0.5) * d.aim * 2;
     const aim = norm(ax - p.x, az - p.z);
     // Vorsichtige KI prüft, ob sie bei einem Fehlschuss selbst herunterfliegen würde
-    const land = { x: p.x + aim.x * 3.4, z: p.z + aim.z * 3.4 };
+    const land = { x: p.x + aim.x * 3.4 * Math.sqrt(slide), z: p.z + aim.z * 3.4 * Math.sqrt(slide) };
     const risky = Math.hypot(land.x, land.z) > safeR + 0.4 || !isSolid(m, land.x, land.z);
     if (!d.careful || !risky || toT.l < 2) return { x: aim.x, z: aim.z, dash: true };
   }
